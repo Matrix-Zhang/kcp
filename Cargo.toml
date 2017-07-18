@@ -4,7 +4,9 @@ version = "0.1.1"
 authors = ["Matrix <113445886@qq.com>"]
 description = "Reliable-UDP Library for Rust"
 license = "MIT"
+readme = "README.md"
 keywords = ["kcp", "udp", "reliable"]
+homepage = "https://github.com/Matrix-Zhang/kcp"
 
 [dependencies]
 bytes = "0.4"
