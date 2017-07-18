@@ -1,5 +1,4 @@
 extern crate bytes;
-extern crate mio;
 
 mod error;
 mod kcp;

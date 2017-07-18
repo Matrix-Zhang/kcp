@@ -5,8 +5,6 @@ use std::ops::Deref;
 
 use bytes::{LittleEndian, BufMut, ByteOrder, BytesMut};
 use error::Error;
-use mio::{self, Ready, PollOpt, Token};
-use mio::event::Evented;
 
 const KCP_RTO_NDL: u32 = 30;
 const KCP_RTO_MIN: u32 = 100;
@@ -903,35 +901,5 @@ impl<Output: Write> Kcp<Output> {
 
     pub fn waitsnd(&self) -> usize {
         self.snd_buf.len() + self.snd_queue.len()
-    }
-}
-
-
-impl<W> Evented for Kcp<W>
-where
-    W: Write + Evented,
-{
-    fn register(
-        &self,
-        poll: &mio::Poll,
-        token: Token,
-        interest: Ready,
-        opts: PollOpt,
-    ) -> io::Result<()> {
-        self.output.register(poll, token, interest, opts)
-    }
-
-    fn reregister(
-        &self,
-        poll: &mio::Poll,
-        token: Token,
-        interest: Ready,
-        opts: PollOpt,
-    ) -> io::Result<()> {
-        self.output.reregister(poll, token, interest, opts)
-    }
-
-    fn deregister(&self, poll: &mio::Poll) -> io::Result<()> {
-        self.output.deregister(poll)
     }
 }
