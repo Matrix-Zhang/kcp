@@ -817,14 +817,14 @@ impl<Output: Write> Kcp<Output> {
         }
 
         if timediff(current, ts_flush) >= 0 {
-            return 0;
+            return self.interval;
         }
 
         let tm_flush = timediff(ts_flush, current) as u32;
         for seg in &self.snd_buf {
             let diff = timediff(seg.resendts, current);
             if diff <= 0 {
-                return 0;
+                return self.interval;
             }
             if (diff as u32) < tm_packet {
                 tm_packet = diff as u32;
@@ -835,12 +835,14 @@ impl<Output: Write> Kcp<Output> {
     }
 
     pub fn setmtu(&mut self, mtu: usize) -> io::Result<()> {
+
         if mtu < 50 || mtu < KCP_OVERHEAD {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
                 Error::InvalidMtuSisze(mtu),
             ));
         }
+
         self.mtu = mtu;
         self.mss = (self.mtu - KCP_OVERHEAD) as u32;
         let size = self.buf.len();
@@ -894,6 +896,7 @@ impl<Output: Write> Kcp<Output> {
         if sndwnd > 0 {
             self.snd_wnd = sndwnd as u16;
         }
+
         if rcvwnd > 0 {
             self.rcv_wnd = rcvwnd as u16;
         }
