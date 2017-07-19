@@ -145,6 +145,7 @@ pub struct Kcp<Output: Write> {
     fastresend: u32,
     nocwnd: bool,
     stream: bool,
+    expired: bool,
 
     output: Output,
 }
@@ -190,8 +191,13 @@ impl<Output: Write> Kcp<Output> {
             interval: KCP_INTERVAL,
             ts_flush: KCP_INTERVAL,
             ssthresh: KCP_THRESH_INIT,
+            expired: false,
             output: output,
         }
+    }
+
+    pub fn expired(&mut self) {
+        self.expired = true;
     }
 
     pub fn peeksize(&self) -> io::Result<usize> {
@@ -226,6 +232,10 @@ impl<Output: Write> Kcp<Output> {
 
     pub fn recv(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let mut len = 0;
+
+        if self.expired {
+            return Ok(0);
+        }
 
         if self.rcv_queue.is_empty() {
             return Err(io::Error::new(
