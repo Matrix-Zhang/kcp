@@ -2,6 +2,7 @@ use std::error::Error as StdError;
 use std::fmt;
 use std::io;
 
+/// KCP protocol errors
 #[derive(Debug)]
 pub enum Error {
     ConvInconsistent(u32, u32),

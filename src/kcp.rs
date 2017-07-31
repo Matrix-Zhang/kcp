@@ -35,6 +35,7 @@ const KCP_THRESH_MIN: u16 = 2;
 const KCP_PROBE_INIT: u32 = 7000;
 const KCP_PROBE_LIMIT: u32 = 120000;
 
+/// Read `conv` from raw buffer
 pub fn get_conv(buf: &[u8]) -> u32 {
     LittleEndian::read_u32(buf)
 }
@@ -95,6 +96,7 @@ impl KcpSegment {
     }
 }
 
+/// KCP control
 #[derive(Default)]
 pub struct Kcp<Output: Write> {
     conv: u32,
@@ -151,6 +153,8 @@ pub struct Kcp<Output: Write> {
 }
 
 impl<Output: Write> Kcp<Output> {
+    /// Creates a KCP control object, `conv` must be equal in both endpoints in one connection.
+    /// `output` is the callback object for writing.
     pub fn new(conv: u32, output: Output) -> Self {
         Kcp {
             conv: conv,
@@ -196,10 +200,12 @@ impl<Output: Write> Kcp<Output> {
         }
     }
 
+    /// Set expired
     pub fn expired(&mut self) {
         self.expired = true;
     }
 
+    /// Check buffer size without actually consuming it
     pub fn peeksize(&self) -> io::Result<usize> {
         match self.rcv_queue.front() {
             Some(segment) => {
@@ -230,6 +236,7 @@ impl<Output: Write> Kcp<Output> {
         }
     }
 
+    /// Receive data from buffer
     pub fn recv(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let mut len = 0;
 
@@ -278,6 +285,7 @@ impl<Output: Write> Kcp<Output> {
         Ok(len)
     }
 
+    /// Send bytes into buffer
     pub fn send(&mut self, mut buf: &[u8]) -> io::Result<usize> {
         let mut len = buf.len();
         let mut sent_size = 0;
@@ -459,6 +467,7 @@ impl<Output: Write> Kcp<Output> {
         }
     }
 
+    /// Call this when you received a packet from raw connection
     pub fn input(&mut self, buf: &[u8]) -> io::Result<()> {
         let mut flag = false;
         let mut max_ack = 0;
@@ -664,6 +673,7 @@ impl<Output: Write> Kcp<Output> {
         Ok(())
     }
 
+    /// Flush pending data in buffer.
     pub fn flush(&mut self) -> io::Result<()> {
         if !self.updated {
             return Err(io::Error::new(io::ErrorKind::Other, Error::NeedUpdate));
@@ -803,6 +813,9 @@ impl<Output: Write> Kcp<Output> {
         Ok(())
     }
 
+    /// Update state every 10ms ~ 100ms.
+    ///
+    /// Or you can ask `check` when to call this again.
     pub fn update(&mut self, current: u32) -> io::Result<()> {
         self.current = current;
 
@@ -829,6 +842,9 @@ impl<Output: Write> Kcp<Output> {
         Ok(())
     }
 
+    /// Determine when you should call `update`.
+    /// Return when you should invoke `update` in millisec, if there is no `input`/`send` calling.
+    /// You can call `update` in that time without calling it repeatly.
     pub fn check(&self, current: u32) -> u32 {
         if !self.updated {
             return 0;
@@ -859,7 +875,8 @@ impl<Output: Write> Kcp<Output> {
         cmp::min(cmp::min(tm_packet, tm_flush), self.interval)
     }
 
-    pub fn setmtu(&mut self, mtu: usize) -> io::Result<()> {
+    /// Change MTU size, default is 1400
+    pub fn set_mtu(&mut self, mtu: usize) -> io::Result<()> {
 
         if mtu < 50 || mtu < KCP_OVERHEAD {
             return Err(io::Error::new(
@@ -881,7 +898,8 @@ impl<Output: Write> Kcp<Output> {
         Ok(())
     }
 
-    pub fn ikcp_interval(&mut self, mut interval: u32) {
+    /// Set check interval
+    pub fn set_interval(&mut self, mut interval: u32) {
         if interval > 5000 {
             interval = 5000;
         } else if interval < 10 {
@@ -890,7 +908,8 @@ impl<Output: Write> Kcp<Output> {
         self.interval = interval;
     }
 
-    pub fn nodelay(&mut self, nodelay: u32, mut interval: i32, resend: i32, nc: bool) {
+    /// Set nodelay
+    pub fn set_nodelay(&mut self, nodelay: u32, mut interval: i32, resend: i32, nc: bool) {
         if nodelay > 0 {
             self.nodelay = true;
             self.rx_minrto = KCP_RTO_NDL;
@@ -916,8 +935,8 @@ impl<Output: Write> Kcp<Output> {
         self.nocwnd = nc;
     }
 
-
-    pub fn wndsize(&mut self, sndwnd: u16, rcvwnd: u16) {
+    /// Set `wndsize`
+    pub fn set_wndsize(&mut self, sndwnd: u16, rcvwnd: u16) {
         if sndwnd > 0 {
             self.snd_wnd = sndwnd as u16;
         }
@@ -927,6 +946,7 @@ impl<Output: Write> Kcp<Output> {
         }
     }
 
+    /// Get `waitsnd`
     pub fn waitsnd(&self) -> usize {
         self.snd_buf.len() + self.snd_queue.len()
     }

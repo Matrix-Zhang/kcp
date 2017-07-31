@@ -1,7 +1,13 @@
+//! [KCP](https://github.com/skywind3000/kcp) implementation in Rust.
+//!
+//! A Fast and Reliable ARQ Protocol
+
 extern crate bytes;
 
 mod error;
 mod kcp;
+
+/// The `KCP` prelude
 pub mod prelude {
     pub use super::{Kcp, get_conv};
 }
