@@ -1,9 +1,9 @@
 use std::cmp;
 use std::collections::VecDeque;
-use std::io::{self, Write};
+use std::io::{self, Read, Write, Cursor};
 use std::ops::Deref;
 
-use bytes::{LittleEndian, BufMut, ByteOrder, BytesMut};
+use bytes::{LittleEndian, BufMut, ByteOrder, BytesMut, Buf};
 use error::Error;
 
 const KCP_RTO_NDL: u32 = 30;
@@ -278,7 +278,7 @@ impl<Output: Write> Kcp<Output> {
         Ok(len)
     }
 
-    pub fn send(&mut self, buf: &mut BytesMut) -> io::Result<usize> {
+    pub fn send(&mut self, mut buf: &[u8]) -> io::Result<usize> {
         let mut len = buf.len();
         let mut sent_size = 0;
 
@@ -291,7 +291,9 @@ impl<Output: Write> Kcp<Output> {
                     let extend = cmp::min(buf.len(), capacity);
                     let mut new_segment = KcpSegment::new(capacity);
                     new_segment.data.extend(old_segment.data);
-                    new_segment.data.extend(buf.split_to(extend));
+                    let (lf, rt) = buf.split_at(extend);
+                    buf = rt;
+                    new_segment.data.extend(lf);
                     new_segment.frg = 0;
                     self.snd_queue.push_back(new_segment);
                     sent_size += extend;
@@ -320,7 +322,9 @@ impl<Output: Write> Kcp<Output> {
             let mut new_segment = KcpSegment::new(size);
 
             if len > 0 {
-                new_segment.data.extend(buf.split_to(size));
+                let (lf, rt) = buf.split_at(size);
+                new_segment.data.extend(lf);
+                buf = rt;
             }
 
             new_segment.frg = if self.stream {
@@ -455,7 +459,7 @@ impl<Output: Write> Kcp<Output> {
         }
     }
 
-    pub fn input(&mut self, buf: &mut BytesMut) -> io::Result<()> {
+    pub fn input(&mut self, buf: &[u8]) -> io::Result<()> {
         let mut flag = false;
         let mut max_ack = 0;
 
@@ -466,8 +470,10 @@ impl<Output: Write> Kcp<Output> {
             ));
         }
 
-        while buf.len() >= KCP_OVERHEAD {
-            let conv = LittleEndian::read_u32(buf.split_to(4).deref());
+        let mut xbuf = Cursor::new(buf);
+
+        while buf.len() - xbuf.position() as usize >= KCP_OVERHEAD {
+            let conv = xbuf.get_u32::<LittleEndian>();
             if conv != self.conv {
                 return Err(io::Error::new(
                     io::ErrorKind::Other,
@@ -475,28 +481,30 @@ impl<Output: Write> Kcp<Output> {
                 ));
             }
 
-            let cmd = buf.split_to(1)[0];
-            let frg = buf.split_to(1)[0];
-            let wnd = LittleEndian::read_u16(buf.split_to(2).deref());
-            let ts = LittleEndian::read_u32(buf.split_to(4).deref());
-            let sn = LittleEndian::read_u32(buf.split_to(4).deref());
-            let una = LittleEndian::read_u32(buf.split_to(4).deref());
-            let len = LittleEndian::read_u32(buf.split_to(4).deref()) as usize;
+            let cmd = xbuf.get_u8();
+            let frg = xbuf.get_u8();
+            let wnd = xbuf.get_u16::<LittleEndian>();
+            let ts = xbuf.get_u32::<LittleEndian>();
+            let sn = xbuf.get_u32::<LittleEndian>();
+            let una = xbuf.get_u32::<LittleEndian>();
+            let len = xbuf.get_u32::<LittleEndian>() as usize;
 
-            if len > buf.len() {
+            let remaining = buf.len() - xbuf.position() as usize;
+            if len > remaining {
                 return Err(io::Error::new(
                     io::ErrorKind::Other,
-                    Error::InvaidSegmentDataSize(len, buf.len()),
+                    Error::InvaidSegmentDataSize(len, remaining),
                 ));
             }
 
-            if cmd != KCP_CMD_PUSH && cmd != KCP_CMD_ACK && cmd != KCP_CMD_WASK &&
-                cmd != KCP_CMD_WINS
-            {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    Error::UnsupportCmd(cmd),
-                ));
+            match cmd {
+                KCP_CMD_PUSH | KCP_CMD_ACK | KCP_CMD_WASK | KCP_CMD_WINS => {}
+                _ => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        Error::UnsupportCmd(cmd),
+                    ));
+                }
             }
 
             self.rmt_wnd = wnd;
@@ -534,7 +542,14 @@ impl<Output: Write> Kcp<Output> {
                             segment.una = una;
 
                             if len > 0 {
-                                segment.data.extend(buf.split_to(len));
+                                let ref mut data = segment.data;
+                                let orig_len = data.len();
+                                let new_len = orig_len + len;
+                                data.reserve(len);
+                                unsafe {
+                                    data.set_len(new_len);
+                                }
+                                xbuf.read_exact(&mut data[orig_len..]).unwrap();
                             }
 
                             self.parse_data(segment);
