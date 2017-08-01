@@ -278,9 +278,10 @@ impl<Output: Write> Kcp<Output> {
         Ok(len)
     }
 
-    pub fn send(&mut self, buf: &mut BytesMut) -> io::Result<usize> {
-        let mut len = buf.len();
+    pub fn send(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let mut offset = 0;
         let mut sent_size = 0;
+        let mut len = buf.len();
 
         assert!(self.mss > 0);
 
@@ -291,7 +292,8 @@ impl<Output: Write> Kcp<Output> {
                     let extend = cmp::min(buf.len(), capacity);
                     let mut new_segment = KcpSegment::new(capacity);
                     new_segment.data.extend(old_segment.data);
-                    new_segment.data.extend(buf.split_to(extend));
+                    new_segment.data.extend(&buf[offset..offset + extend]);
+                    offset += extend;
                     new_segment.frg = 0;
                     self.snd_queue.push_back(new_segment);
                     sent_size += extend;
@@ -320,7 +322,8 @@ impl<Output: Write> Kcp<Output> {
             let mut new_segment = KcpSegment::new(size);
 
             if len > 0 {
-                new_segment.data.extend(buf.split_to(size));
+                new_segment.data.extend(&buf[offset..offset + size]);
+                offset += size;
             }
 
             new_segment.frg = if self.stream {
@@ -455,9 +458,10 @@ impl<Output: Write> Kcp<Output> {
         }
     }
 
-    pub fn input(&mut self, buf: &mut BytesMut) -> io::Result<()> {
+    pub fn input(&mut self, buf: &mut [u8]) -> io::Result<()> {
         let mut flag = false;
         let mut max_ack = 0;
+        let mut offset = 0;
 
         if buf.len() < KCP_OVERHEAD {
             return Err(io::Error::new(
@@ -466,8 +470,9 @@ impl<Output: Write> Kcp<Output> {
             ));
         }
 
-        while buf.len() >= KCP_OVERHEAD {
-            let conv = LittleEndian::read_u32(buf.split_to(4).deref());
+        while buf.len() - offset >= KCP_OVERHEAD {
+            let conv = LittleEndian::read_u32(&buf[offset..offset + 4]);
+            offset += 4;
             if conv != self.conv {
                 return Err(io::Error::new(
                     io::ErrorKind::Other,
@@ -475,13 +480,20 @@ impl<Output: Write> Kcp<Output> {
                 ));
             }
 
-            let cmd = buf.split_to(1)[0];
-            let frg = buf.split_to(1)[0];
-            let wnd = LittleEndian::read_u16(buf.split_to(2).deref());
-            let ts = LittleEndian::read_u32(buf.split_to(4).deref());
-            let sn = LittleEndian::read_u32(buf.split_to(4).deref());
-            let una = LittleEndian::read_u32(buf.split_to(4).deref());
-            let len = LittleEndian::read_u32(buf.split_to(4).deref()) as usize;
+            let cmd = buf[offset];
+            offset += 1;
+            let frg = buf[offset];
+            offset += 1;
+            let wnd = LittleEndian::read_u16(&buf[offset..offset + 2]);
+            offset += 2;
+            let ts = LittleEndian::read_u32(&buf[offset..offset + 4]);
+            offset += 4;
+            let sn = LittleEndian::read_u32(&buf[offset..offset + 4]);
+            offset += 4;
+            let una = LittleEndian::read_u32(&buf[offset..offset + 4]);
+            offset += 4;
+            let len = LittleEndian::read_u32(&buf[offset..offset + 4]) as usize;
+            offset += 4;
 
             if len > buf.len() {
                 return Err(io::Error::new(
@@ -534,7 +546,8 @@ impl<Output: Write> Kcp<Output> {
                             segment.una = una;
 
                             if len > 0 {
-                                segment.data.extend(buf.split_to(len));
+                                segment.data.extend(&buf[offset..offset + len]);
+                                offset += len;
                             }
 
                             self.parse_data(segment);
