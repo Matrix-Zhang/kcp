@@ -1,3 +1,5 @@
+//! KCP
+
 use std::cmp;
 use std::collections::VecDeque;
 use std::io::{self, Cursor, Read, Write};
@@ -482,7 +484,7 @@ impl<Output: Write> Kcp<Output> {
         trace!("[RI] {} bytes", buf.len());
 
         if buf.len() < KCP_OVERHEAD {
-            return Err(io::Error::new(io::ErrorKind::Other, Error::InvaidSegmentSize(buf.len())));
+            return Err(io::Error::new(io::ErrorKind::Other, Error::InvalidSegmentSize(buf.len())));
         }
 
         let mut size = buf.len();
@@ -503,7 +505,7 @@ impl<Output: Write> Kcp<Output> {
 
             size -= KCP_OVERHEAD;
             if size < len {
-                return Err(io::Error::new(io::ErrorKind::Other, Error::InvaidSegmentDataSize(len, size)));
+                return Err(io::Error::new(io::ErrorKind::Other, Error::InvalidSegmentDataSize(len, size)));
             }
 
             match cmd {
@@ -963,5 +965,10 @@ impl<Output: Write> Kcp<Output> {
     /// Set `fastresend`
     pub fn set_fast_resend(&mut self, fr: u32) {
         self.fastresend = fr;
+    }
+
+    /// KCP header size
+    pub fn header_len() -> usize {
+        KCP_OVERHEAD as usize
     }
 }

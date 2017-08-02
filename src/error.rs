@@ -7,8 +7,8 @@ use std::io;
 pub enum Error {
     ConvInconsistent(u32, u32),
     InvalidMtuSisze(usize),
-    InvaidSegmentSize(usize),
-    InvaidSegmentDataSize(usize, usize),
+    InvalidSegmentSize(usize),
+    InvalidSegmentDataSize(usize, usize),
     IoError(io::Error),
     NeedUpdate,
     RecvQueueEmpty,
@@ -21,10 +21,10 @@ pub enum Error {
 impl StdError for Error {
     fn description(&self) -> &str {
         match *self {
-            Error::ConvInconsistent(_, _) => "segment's conv number is inconsistent.",
+            Error::ConvInconsistent(..) => "segment's conv number is inconsistent.",
             Error::InvalidMtuSisze(_) => "invalid mtu size.",
-            Error::InvaidSegmentSize(_) => "invalid segment size.",
-            Error::InvaidSegmentDataSize(_, _) => "segment's data size is invalid.",
+            Error::InvalidSegmentSize(_) => "invalid segment size.",
+            Error::InvalidSegmentDataSize(..) => "segment's data size is invalid.",
             Error::IoError(ref e) => e.description(),
             Error::NeedUpdate => "need call kcp's update method.",
             Error::RecvQueueEmpty => "kcp's recvive queue is empty.",
@@ -47,22 +47,12 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match *self {
             Error::ConvInconsistent(ref s, ref o) => {
-                write!(
-                    f,
-                    "segment's conv number is inconsistent, our's is {}, the other's is {}.",
-                    *s,
-                    *o
-                )
+                write!(f, "segment's conv number is inconsistent, our's is {}, the other's is {}.", *s, *o)
             }
             Error::InvalidMtuSisze(ref e) => write!(f, "invalid mtu size of {}", *e),
-            Error::InvaidSegmentSize(ref e) => write!(f, "invalid segment size of {}.", *e),
-            Error::InvaidSegmentDataSize(ref s, ref o) => {
-                write!(
-                    f,
-                    "segment's data size is invalid, size in header is {}, the actual size is {}.",
-                    *s,
-                    *o
-                )
+            Error::InvalidSegmentSize(ref e) => write!(f, "invalid segment size of {}.", *e),
+            Error::InvalidSegmentDataSize(ref s, ref o) => {
+                write!(f, "segment's data size is invalid, size in header is {}, the actual size is {}.", *s, *o)
             }
             Error::IoError(ref e) => e.fmt(f),
             Error::UnsupportCmd(ref e) => write!(f, "cmd {} is unsupport.", *e),
