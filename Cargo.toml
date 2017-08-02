@@ -10,3 +10,9 @@ homepage = "https://github.com/Matrix-Zhang/kcp"
 
 [dependencies]
 bytes = "0.4"
+log = "0.3"
+
+[dev-dependencies]
+time = "0.1"
+rand = "0.3"
+env_logger = "0.4"

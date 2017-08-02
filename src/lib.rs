@@ -3,6 +3,8 @@
 //! A Fast and Reliable ARQ Protocol
 
 extern crate bytes;
+#[macro_use]
+extern crate log;
 
 mod error;
 mod kcp;
