@@ -261,16 +261,16 @@ fn run(mode: TestMode, msgcount: u32) {
 
     match mode {
         TestMode::Default => {
-            kcp1.set_nodelay(0, 10, 0, false);
-            kcp2.set_nodelay(0, 10, 0, false);
+            kcp1.set_nodelay(false, 10, 0, false);
+            kcp2.set_nodelay(false, 10, 0, false);
         }
         TestMode::Normal => {
-            kcp1.set_nodelay(0, 10, 0, true);
-            kcp2.set_nodelay(0, 10, 0, true);
+            kcp1.set_nodelay(false, 10, 0, true);
+            kcp2.set_nodelay(false, 10, 0, true);
         }
         TestMode::Fast => {
-            kcp1.set_nodelay(1, 10, 2, true);
-            kcp2.set_nodelay(1, 10, 2, true);
+            kcp1.set_nodelay(true, 10, 2, true);
+            kcp2.set_nodelay(true, 10, 2, true);
 
             kcp1.set_rx_minrto(10);
             kcp2.set_fast_resend(1);
