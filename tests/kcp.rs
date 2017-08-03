@@ -230,9 +230,9 @@ enum TestMode {
     Fast,
 }
 
-fn run(mode: TestMode, msgcount: u32) {
-    // Lost Rate 10%, Rtt 60ms ~ 125ms
-    let vnet = LatencySimulator::new(10, 60, 125, 1000);
+fn run(mode: TestMode, msgcount: u32, lostrate: u32) {
+    // Rtt 60ms ~ 125ms
+    let vnet = LatencySimulator::new(lostrate, 60, 125, 1000);
     let vnet = Rc::new(RefCell::new(vnet));
 
     let mut kcp1 = Kcp::new(0x11223344,
@@ -373,17 +373,35 @@ fn run(mode: TestMode, msgcount: u32) {
 #[test]
 fn kcp_default() {
     let _ = env_logger::init();
-    run(TestMode::Default, 200);
+    run(TestMode::Default, 1000, 10);
 }
 
 #[test]
 fn kcp_normal() {
     let _ = env_logger::init();
-    run(TestMode::Normal, 200);
+    run(TestMode::Normal, 1000, 10);
 }
 
 #[test]
 fn kcp_fast() {
     let _ = env_logger::init();
-    run(TestMode::Fast, 200);
+    run(TestMode::Fast, 1000, 10);
+}
+
+#[test]
+fn kcp_massive_lost_default() {
+    let _ = env_logger::init();
+    run(TestMode::Default, 1000, 50);
+}
+
+#[test]
+fn kcp_massive_lost_normal() {
+    let _ = env_logger::init();
+    run(TestMode::Normal, 1000, 50);
+}
+
+#[test]
+fn kcp_massive_lost_fast() {
+    let _ = env_logger::init();
+    run(TestMode::Fast, 1000, 50);
 }
