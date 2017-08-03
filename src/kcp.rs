@@ -915,8 +915,15 @@ impl<Output: Write> Kcp<Output> {
     }
 
     /// Set nodelay
-    pub fn set_nodelay(&mut self, nodelay: u32, mut interval: i32, resend: i32, nc: bool) {
-        if nodelay > 0 {
+    ///
+    /// fastest config: nodelay(true, 20, 2, true)
+    ///
+    /// `nodelay`: default is disable (false)
+    /// `interval`: internal update timer interval in millisec, default is 100ms
+    /// `resend`: 0:disable fast resend(default), 1:enable fast resend
+    /// `nc`: `false`: normal congestion control(default), `true`: disable congestion control
+    pub fn set_nodelay(&mut self, nodelay: bool, mut interval: i32, resend: i32, nc: bool) {
+        if nodelay {
             self.nodelay = true;
             self.rx_minrto = KCP_RTO_NDL;
         } else {
@@ -942,6 +949,7 @@ impl<Output: Write> Kcp<Output> {
     }
 
     /// Set `wndsize`
+    /// set maximum window size: `sndwnd=32`, `rcvwnd=32` by default
     pub fn set_wndsize(&mut self, sndwnd: u16, rcvwnd: u16) {
         if sndwnd > 0 {
             self.snd_wnd = sndwnd as u16;
@@ -952,7 +960,7 @@ impl<Output: Write> Kcp<Output> {
         }
     }
 
-    /// Get `waitsnd`
+    /// Get `waitsnd`, how many packet is waiting to be sent
     pub fn waitsnd(&self) -> usize {
         self.snd_buf.len() + self.snd_queue.len()
     }
