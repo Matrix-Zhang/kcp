@@ -125,40 +125,68 @@ impl<O: Write> Write for KcpOutput<O> {
 /// KCP control
 #[derive(Default)]
 pub struct Kcp<Output: Write> {
+    /// Conversation ID
     conv: u32,
+    /// Maximun Transmission Unit
     mtu: usize,
+    /// Maximum Segment Size
     mss: u32,
+    /// Connection state
     state: i32,
 
+    /// First unacknowledged packet
     snd_una: u32,
+    /// Next packet
     snd_nxt: u32,
+    /// Next packet to be received
     rcv_nxt: u32,
 
+    /// Congetion window threshole
     ssthresh: u16,
 
+    /// ACK receive variable RTT
     rx_rttval: u32,
+    /// ACK receive static RTT
     rx_srtt: u32,
+    /// Resend time (calculated by ACK delay time)
     rx_rto: u32,
+    /// Minimal resend timeout
     rx_minrto: u32,
 
+    /// Send window
     snd_wnd: u16,
+    /// Receive window
     rcv_wnd: u16,
+    /// Remote receive window
     rmt_wnd: u16,
+    /// Congetion window
     cwnd: u16,
+    /// Check window
+    /// - IKCP_ASK_TELL, telling window size to remote
+    /// - IKCP_ASK_SEND, ask remote for window size
     probe: u32,
 
+    /// Last update time
     current: u32,
+    /// Flush interval
     interval: u32,
+    /// Next flush interval
     ts_flush: u32,
     xmit: u32,
 
+    /// Enable nodelay
     nodelay: bool,
+    /// Updated has been called or not
     updated: bool,
 
+    /// Next check window timestamp
     ts_probe: u32,
+    /// Check window wait time
     probe_wait: u32,
 
+    /// Maximum resend time
     dead_link: u32,
+    /// Maximum payload size
     incr: u32,
 
     snd_queue: VecDeque<KcpSegment>,
@@ -166,12 +194,17 @@ pub struct Kcp<Output: Write> {
     snd_buf: VecDeque<KcpSegment>,
     rcv_buf: VecDeque<KcpSegment>,
 
+    /// Pending ACK
     acklist: Vec<(u32, u32)>,
     buf: BytesMut,
 
+    /// ACK number to trigger fast resend
     fastresend: u32,
+    /// Disable congetion control
     nocwnd: bool,
+    /// Enable stream mode
     stream: bool,
+    /// Connection is expired
     expired: bool,
 
     output: KcpOutput<Output>,
@@ -180,6 +213,8 @@ pub struct Kcp<Output: Write> {
 impl<Output: Write> Kcp<Output> {
     /// Creates a KCP control object, `conv` must be equal in both endpoints in one connection.
     /// `output` is the callback object for writing.
+    ///
+    /// `conv` represents conversation.
     pub fn new(conv: u32, output: Output) -> Self {
         Kcp {
             conv: conv,
@@ -885,6 +920,8 @@ impl<Output: Write> Kcp<Output> {
     }
 
     /// Change MTU size, default is 1400
+    ///
+    /// MTU = Maximum Transmission Unit
     pub fn set_mtu(&mut self, mtu: usize) -> io::Result<()> {
 
         if mtu < 50 || mtu < KCP_OVERHEAD {
@@ -902,6 +939,11 @@ impl<Output: Write> Kcp<Output> {
         }
 
         Ok(())
+    }
+
+    /// Get MTU
+    pub fn mtu(&self) -> usize {
+        self.mtu
     }
 
     /// Set check interval
@@ -978,5 +1020,15 @@ impl<Output: Write> Kcp<Output> {
     /// KCP header size
     pub fn header_len() -> usize {
         KCP_OVERHEAD as usize
+    }
+
+    /// Enable stream mode
+    pub fn set_stream(&mut self, s: bool) {
+        self.stream = s;
+    }
+
+    /// Enabled stream or not
+    pub fn is_stream(&self) -> bool {
+        self.stream
     }
 }
