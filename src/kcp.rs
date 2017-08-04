@@ -195,7 +195,7 @@ pub struct Kcp<Output: Write> {
     rcv_buf: VecDeque<KcpSegment>,
 
     /// Pending ACK
-    acklist: Vec<(u32, u32)>,
+    acklist: VecDeque<(u32, u32)>,
     buf: BytesMut,
 
     /// ACK number to trigger fast resend
@@ -248,7 +248,7 @@ impl<Output: Write> Kcp<Output> {
             rcv_queue: VecDeque::new(),
             snd_buf: VecDeque::new(),
             rcv_buf: VecDeque::new(),
-            acklist: vec![],
+            acklist: VecDeque::new(),
             rx_rto: KCP_RTO_DEF,
             rx_minrto: KCP_RTO_MIN,
             interval: KCP_INTERVAL,
@@ -467,7 +467,7 @@ impl<Output: Write> Kcp<Output> {
     }
 
     fn ack_push(&mut self, sn: u32, ts: u32) {
-        self.acklist.push((sn, ts));
+        self.acklist.push_back((sn, ts));
     }
 
     fn parse_data(&mut self, new_segment: KcpSegment) {
@@ -655,8 +655,7 @@ impl<Output: Write> Kcp<Output> {
 
     fn flush_ack(&mut self, segment: &mut KcpSegment) -> io::Result<()> {
         // flush acknowledges
-        while !self.acklist.is_empty() {
-            let (sn, ts) = self.acklist.remove(0);
+        while let Some((sn, ts)) = self.acklist.pop_front() {
             if self.buf.len() + KCP_OVERHEAD > self.mtu as usize {
                 self.output.write_all(&self.buf)?;
                 self.buf.clear();
