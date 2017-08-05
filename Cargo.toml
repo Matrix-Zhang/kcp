@@ -1,6 +1,6 @@
 [package]
 name = "kcp"
-version = "0.1.4"
+version = "0.1.5"
 authors = ["Matrix <113445886@qq.com>"]
 description = "Reliable-UDP Library for Rust"
 license = "MIT"

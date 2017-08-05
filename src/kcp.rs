@@ -306,6 +306,7 @@ impl<Output: Write> Kcp<Output> {
         let peeksize = self.peeksize()?;
 
         if peeksize > cur.get_ref().len() {
+            error!("recv peeksize={} bufsize={} too small", peeksize, cur.get_ref().len());
             return Err(io::Error::new(io::ErrorKind::Other, Error::UserBufTooSmall));
         }
 
@@ -380,6 +381,7 @@ impl<Output: Write> Kcp<Output> {
         };
 
         if count > 255 {
+            error!("send bufsize={} mss={} too large", buf.len(), self.mss);
             return Err(io::Error::new(io::ErrorKind::Other, Error::UserBufTooBig));
         }
 
@@ -519,6 +521,7 @@ impl<Output: Write> Kcp<Output> {
         trace!("[RI] {} bytes", buf.len());
 
         if buf.len() < KCP_OVERHEAD {
+            error!("input bufsize={} too small, at least {}", buf.len(), KCP_OVERHEAD);
             return Err(io::Error::new(io::ErrorKind::Other, Error::InvalidSegmentSize(buf.len())));
         }
 
@@ -527,6 +530,7 @@ impl<Output: Write> Kcp<Output> {
             let mut xbuf = Cursor::new(buf);
             let conv = xbuf.get_u32::<LittleEndian>();
             if conv != self.conv {
+                error!("input conv={} expected conv={} not match", conv, self.conv);
                 return Err(io::Error::new(io::ErrorKind::Other, Error::ConvInconsistent(self.conv, conv)));
             }
 
@@ -540,12 +544,14 @@ impl<Output: Write> Kcp<Output> {
 
             size -= KCP_OVERHEAD;
             if size < len {
+                error!("input bufsize={} payload length={} remaining={} not match", buf.len(), len, size);
                 return Err(io::Error::new(io::ErrorKind::Other, Error::InvalidSegmentDataSize(len, size)));
             }
 
             match cmd {
                 KCP_CMD_PUSH | KCP_CMD_ACK | KCP_CMD_WASK | KCP_CMD_WINS => {}
                 _ => {
+                    error!("input cmd={} unrecognized", cmd);
                     return Err(io::Error::new(io::ErrorKind::Other, Error::UnsupportCmd(cmd)));
                 }
             }
@@ -720,6 +726,7 @@ impl<Output: Write> Kcp<Output> {
     /// Flush pending data in buffer.
     pub fn flush(&mut self) -> io::Result<()> {
         if !self.updated {
+            error!("flush updated() must be called at least once");
             return Err(io::Error::new(io::ErrorKind::Other, Error::NeedUpdate));
         }
 
@@ -924,6 +931,7 @@ impl<Output: Write> Kcp<Output> {
     pub fn set_mtu(&mut self, mtu: usize) -> io::Result<()> {
 
         if mtu < 50 || mtu < KCP_OVERHEAD {
+            error!("set_mtu mtu={} invalid", mtu);
             return Err(io::Error::new(io::ErrorKind::Other, Error::InvalidMtuSisze(mtu)));
         }
 
