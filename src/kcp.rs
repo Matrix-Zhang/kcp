@@ -4,6 +4,7 @@ use std::cmp;
 use std::collections::VecDeque;
 use std::io::{self, Cursor, Read, Write};
 
+use KcpResult;
 use bytes::{Buf, BufMut, ByteOrder, BytesMut, LittleEndian};
 use error::Error;
 
@@ -265,7 +266,7 @@ impl<Output: Write> Kcp<Output> {
     }
 
     /// Check buffer size without actually consuming it
-    pub fn peeksize(&self) -> io::Result<usize> {
+    pub fn peeksize(&self) -> KcpResult<usize> {
         match self.rcv_queue.front() {
             Some(segment) => {
                 if segment.frg == 0 {
@@ -273,7 +274,7 @@ impl<Output: Write> Kcp<Output> {
                 }
 
                 if self.rcv_queue.len() < segment.frg as usize + 1 {
-                    return Err(io::Error::new(io::ErrorKind::WouldBlock, Error::UnexpectedEof));
+                    return Err(Error::UnexpectedEof);
                 }
 
                 let mut len = 0;
@@ -287,12 +288,12 @@ impl<Output: Write> Kcp<Output> {
 
                 Ok(len)
             }
-            None => Err(io::Error::new(io::ErrorKind::WouldBlock, Error::RecvQueueEmpty)),
+            None => Err(Error::RecvQueueEmpty),
         }
     }
 
     /// Receive data from buffer
-    pub fn recv(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+    pub fn recv(&mut self, buf: &mut [u8]) -> KcpResult<usize> {
         let mut cur = Cursor::new(buf);
 
         if self.expired {
@@ -300,14 +301,14 @@ impl<Output: Write> Kcp<Output> {
         }
 
         if self.rcv_queue.is_empty() {
-            return Err(io::Error::new(io::ErrorKind::WouldBlock, Error::RecvQueueEmpty));
+            return Err(Error::RecvQueueEmpty);
         }
 
         let peeksize = self.peeksize()?;
 
         if peeksize > cur.get_ref().len() {
             error!("recv peeksize={} bufsize={} too small", peeksize, cur.get_ref().len());
-            return Err(io::Error::new(io::ErrorKind::Other, Error::UserBufTooSmall));
+            return Err(Error::UserBufTooSmall);
         }
 
         let recover = self.rcv_queue.len() >= self.rcv_wnd as usize;
@@ -351,7 +352,7 @@ impl<Output: Write> Kcp<Output> {
     }
 
     /// Send bytes into buffer
-    pub fn send(&mut self, mut buf: &[u8]) -> io::Result<usize> {
+    pub fn send(&mut self, mut buf: &[u8]) -> KcpResult<usize> {
         let buf_size = buf.len();
         let mut sent_size = 0;
 
@@ -382,7 +383,7 @@ impl<Output: Write> Kcp<Output> {
 
         if count > 255 {
             error!("send bufsize={} mss={} too large", buf.len(), self.mss);
-            return Err(io::Error::new(io::ErrorKind::Other, Error::UserBufTooBig));
+            return Err(Error::UserBufTooBig);
         }
 
         let count = cmp::max(1, count);
@@ -514,7 +515,7 @@ impl<Output: Write> Kcp<Output> {
     }
 
     /// Call this when you received a packet from raw connection
-    pub fn input(&mut self, mut buf: &[u8]) -> io::Result<()> {
+    pub fn input(&mut self, mut buf: &[u8]) -> KcpResult<()> {
         let mut flag = false;
         let mut max_ack = 0;
 
@@ -522,7 +523,7 @@ impl<Output: Write> Kcp<Output> {
 
         if buf.len() < KCP_OVERHEAD {
             error!("input bufsize={} too small, at least {}", buf.len(), KCP_OVERHEAD);
-            return Err(io::Error::new(io::ErrorKind::Other, Error::InvalidSegmentSize(buf.len())));
+            return Err(Error::InvalidSegmentSize(buf.len()));
         }
 
         let mut size = buf.len();
@@ -531,7 +532,7 @@ impl<Output: Write> Kcp<Output> {
             let conv = xbuf.get_u32::<LittleEndian>();
             if conv != self.conv {
                 error!("input conv={} expected conv={} not match", conv, self.conv);
-                return Err(io::Error::new(io::ErrorKind::Other, Error::ConvInconsistent(self.conv, conv)));
+                return Err(Error::ConvInconsistent(self.conv, conv));
             }
 
             let cmd = xbuf.get_u8();
@@ -545,14 +546,14 @@ impl<Output: Write> Kcp<Output> {
             size -= KCP_OVERHEAD;
             if size < len {
                 error!("input bufsize={} payload length={} remaining={} not match", buf.len(), len, size);
-                return Err(io::Error::new(io::ErrorKind::Other, Error::InvalidSegmentDataSize(len, size)));
+                return Err(Error::InvalidSegmentDataSize(len, size));
             }
 
             match cmd {
                 KCP_CMD_PUSH | KCP_CMD_ACK | KCP_CMD_WASK | KCP_CMD_WINS => {}
                 _ => {
                     error!("input cmd={} unrecognized", cmd);
-                    return Err(io::Error::new(io::ErrorKind::Other, Error::UnsupportCmd(cmd)));
+                    return Err(Error::UnsupportCmd(cmd));
                 }
             }
 
@@ -659,7 +660,7 @@ impl<Output: Write> Kcp<Output> {
         }
     }
 
-    fn flush_ack(&mut self, segment: &mut KcpSegment) -> io::Result<()> {
+    fn flush_ack(&mut self, segment: &mut KcpSegment) -> KcpResult<()> {
         // flush acknowledges
         while let Some((sn, ts)) = self.acklist.pop_front() {
             if self.buf.len() + KCP_OVERHEAD > self.mtu as usize {
@@ -697,7 +698,7 @@ impl<Output: Write> Kcp<Output> {
         }
     }
 
-    fn flush_probe_commands(&mut self, segment: &mut KcpSegment) -> io::Result<()> {
+    fn flush_probe_commands(&mut self, segment: &mut KcpSegment) -> KcpResult<()> {
         // flush window probing commands
         if self.probe & KCP_ASK_SEND != 0 {
             segment.cmd = KCP_CMD_WASK;
@@ -724,10 +725,10 @@ impl<Output: Write> Kcp<Output> {
     }
 
     /// Flush pending data in buffer.
-    pub fn flush(&mut self) -> io::Result<()> {
+    pub fn flush(&mut self) -> KcpResult<()> {
         if !self.updated {
             error!("flush updated() must be called at least once");
-            return Err(io::Error::new(io::ErrorKind::Other, Error::NeedUpdate));
+            return Err(Error::NeedUpdate);
         }
 
         let mut segment = KcpSegment::default();
@@ -866,7 +867,7 @@ impl<Output: Write> Kcp<Output> {
     /// Update state every 10ms ~ 100ms.
     ///
     /// Or you can ask `check` when to call this again.
-    pub fn update(&mut self, current: u32) -> io::Result<()> {
+    pub fn update(&mut self, current: u32) -> KcpResult<()> {
         self.current = current;
 
         if !self.updated {
@@ -928,11 +929,11 @@ impl<Output: Write> Kcp<Output> {
     /// Change MTU size, default is 1400
     ///
     /// MTU = Maximum Transmission Unit
-    pub fn set_mtu(&mut self, mtu: usize) -> io::Result<()> {
+    pub fn set_mtu(&mut self, mtu: usize) -> KcpResult<()> {
 
         if mtu < 50 || mtu < KCP_OVERHEAD {
             error!("set_mtu mtu={} invalid", mtu);
-            return Err(io::Error::new(io::ErrorKind::Other, Error::InvalidMtuSisze(mtu)));
+            return Err(Error::InvalidMtu(mtu));
         }
 
         self.mtu = mtu;
