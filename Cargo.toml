@@ -1,12 +1,12 @@
 [package]
 name = "kcp"
-version = "0.1.5"
-authors = ["Matrix <113445886@qq.com>"]
+version = "0.3.1"
+authors = ["Matrix <113445886@qq.com>", "Y. T. Chung <zonyitoo@gmail.com>"]
 description = "Reliable-UDP Library for Rust"
 license = "MIT"
 readme = "README.md"
 keywords = ["kcp", "udp", "reliable"]
-homepage = "https://github.com/Matrix-Zhang/kcp"
+repository = "https://github.com/Matrix-Zhang/kcp"
 
 [dependencies]
 bytes = "0.4"
