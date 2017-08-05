@@ -273,7 +273,7 @@ impl<Output: Write> Kcp<Output> {
                 }
 
                 if self.rcv_queue.len() < segment.frg as usize + 1 {
-                    return Err(io::Error::new(io::ErrorKind::WouldBlock, Error::UnexceptedEOF));
+                    return Err(io::Error::new(io::ErrorKind::WouldBlock, Error::UnexpectedEof));
                 }
 
                 let mut len = 0;
