@@ -1010,6 +1010,16 @@ impl<Output: Write> Kcp<Output> {
         }
     }
 
+    /// `snd_wnd` Send window
+    pub fn snd_wnd(&self) -> u16 {
+        self.snd_wnd
+    }
+
+    /// `rcv_wnd` Receive window
+    pub fn rcv_wnd(&self) -> u16 {
+        self.rcv_wnd
+    }
+
     /// Get `waitsnd`, how many packet is waiting to be sent
     pub fn waitsnd(&self) -> usize {
         self.snd_buf.len() + self.snd_queue.len()
