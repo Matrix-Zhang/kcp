@@ -591,6 +591,8 @@ impl<Output: Write> Kcp<Output> {
             self.parse_una(una);
             self.shrink_buf();
 
+            let mut has_read_data = false;
+
             match cmd {
                 KCP_CMD_ACK => {
                     let rtt = timediff(self.current, ts);
@@ -620,6 +622,7 @@ impl<Output: Write> Kcp<Output> {
                                 sbuf.set_len(len as usize);
                             }
                             buf.read_exact(&mut sbuf).unwrap();
+                            has_read_data = true;
 
                             let mut segment = KcpSegment::new_with_data(sbuf);
 
@@ -644,6 +647,12 @@ impl<Output: Write> Kcp<Output> {
                     trace!("input wins: {}", wnd);
                 }
                 _ => unreachable!(),
+            }
+
+            // Force skip unread data
+            if !has_read_data {
+                let next_pos = buf.position() + len as u64;
+                buf.set_position(next_pos);
             }
         }
 
