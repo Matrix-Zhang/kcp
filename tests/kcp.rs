@@ -5,7 +5,7 @@ extern crate time;
 extern crate env_logger;
 
 use std::cell::RefCell;
-use std::collections::LinkedList;
+use std::collections::VecDeque;
 use std::io::{self, Cursor, ErrorKind, Read, Write};
 use std::rc::Rc;
 use std::thread::sleep;
@@ -64,9 +64,8 @@ impl Random {
         }
 
         if self.size == 0 {
-            let len = self.seeds.len();
-            for i in 0..len {
-                self.seeds[i] = i as u32;
+            for (i, e) in self.seeds.iter_mut().enumerate() {
+                *e = i as u32;
             }
             self.size = self.seeds.len();
         }
@@ -100,8 +99,8 @@ struct LatencySimulator {
     tx1: u32,
     tx2: u32,
     current: u32,
-    p12: LinkedList<DelayPacket>,
-    p21: LinkedList<DelayPacket>,
+    p12: VecDeque<DelayPacket>,
+    p21: VecDeque<DelayPacket>,
     r12: Random,
     r21: Random,
 }
@@ -110,14 +109,14 @@ impl LatencySimulator {
     fn new(lostrate: u32, rttmin: u32, rttmax: u32, nmax: usize) -> LatencySimulator {
         LatencySimulator {
             lostrate: lostrate / 2,
-            rttmin: rttmin,
-            rttmax: rttmax,
+            rttmin: rttmin / 2,
+            rttmax: rttmax / 2,
             nmax: nmax,
             tx1: 0,
             tx2: 0,
             current: ::current(),
-            p12: LinkedList::new(),
-            p21: LinkedList::new(),
+            p12: VecDeque::new(),
+            p21: VecDeque::new(),
             r12: Random::new(100),
             r21: Random::new(100),
         }
