@@ -39,7 +39,14 @@ const KCP_PROBE_LIMIT: u32 = 120000;
 
 /// Read `conv` from raw buffer
 pub fn get_conv(buf: &[u8]) -> u32 {
+    assert!(buf.len() >= KCP_OVERHEAD);
     LittleEndian::read_u32(buf)
+}
+
+/// Set `conv` to raw buffer
+pub fn set_conv(buf: &mut [u8], conv: u32) {
+    assert!(buf.len() >= KCP_OVERHEAD);
+    LittleEndian::write_u32(buf, conv)
 }
 
 #[inline]
@@ -206,6 +213,9 @@ pub struct Kcp<Output: Write> {
     /// Enable stream mode
     stream: bool,
 
+    /// Get conv from the next input call
+    input_conv: bool,
+
     output: KcpOutput<Output>,
 }
 
@@ -248,7 +258,6 @@ impl<Output: Write> Kcp<Output> {
             fastresend: 0,
             nocwnd: false,
             stream: stream,
-
             snd_wnd: KCP_WND_SND,
             rcv_wnd: KCP_WND_RCV,
             rmt_wnd: KCP_WND_RCV,
@@ -265,6 +274,7 @@ impl<Output: Write> Kcp<Output> {
             interval: KCP_INTERVAL,
             ts_flush: KCP_INTERVAL,
             ssthresh: KCP_THRESH_INIT,
+            input_conv: false,
             output: KcpOutput(output),
         }
     }
@@ -527,6 +537,18 @@ impl<Output: Write> Kcp<Output> {
         }
     }
 
+    /// Get `conv` from the next `input` call
+    #[inline]
+    pub fn input_conv(&mut self) {
+        self.input_conv = true;
+    }
+
+    /// Set `conv` value
+    #[inline]
+    pub fn set_conv(&mut self, conv: u32) {
+        self.conv = conv;
+    }
+
     /// Call this when you received a packet from raw connection
     pub fn input(&mut self, buf: &[u8]) -> KcpResult<usize> {
         let input_size = buf.len();
@@ -546,8 +568,16 @@ impl<Output: Write> Kcp<Output> {
         while buf.remaining() >= KCP_OVERHEAD as usize {
             let conv = buf.get_u32::<LittleEndian>();
             if conv != self.conv {
-                debug!("input conv={} expected conv={} not match", conv, self.conv);
-                return Err(Error::ConvInconsistent(self.conv, conv));
+                // This allows getting conv from this call, which allows us to allocate
+                // conv from the server side.
+                if self.input_conv {
+                    debug!("input conv={} updated, original conv={}", conv, self.conv);
+                    self.conv = conv;
+                    self.input_conv = false;
+                } else {
+                    debug!("input conv={} expected conv={} not match", conv, self.conv);
+                    return Err(Error::ConvInconsistent(self.conv, conv));
+                }
             }
 
             let cmd = buf.get_u8();
