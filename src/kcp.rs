@@ -1078,7 +1078,7 @@ impl<Output: Write> Kcp<Output> {
     }
 
     /// Get `waitsnd`, how many packet is waiting to be sent
-    pub fn waitsnd(&self) -> usize {
+    pub fn wait_snd(&self) -> usize {
         self.snd_buf.len() + self.snd_queue.len()
     }
 
