@@ -549,6 +549,12 @@ impl<Output: Write> Kcp<Output> {
         self.conv = conv;
     }
 
+    /// Get `conv`
+    #[inline]
+    pub fn conv(&self) -> u32 {
+        self.conv
+    }
+
     /// Call this when you received a packet from raw connection
     pub fn input(&mut self, buf: &[u8]) -> KcpResult<usize> {
         let input_size = buf.len();
