@@ -205,8 +205,6 @@ pub struct Kcp<Output: Write> {
     nocwnd: bool,
     /// Enable stream mode
     stream: bool,
-    /// Connection is expired
-    expired: bool,
 
     output: KcpOutput<Output>,
 }
@@ -217,6 +215,18 @@ impl<Output: Write> Kcp<Output> {
     ///
     /// `conv` represents conversation.
     pub fn new(conv: u32, output: Output) -> Self {
+        Kcp::construct(conv, output, false)
+    }
+
+    /// Creates a KCP control object in stream mode, `conv` must be equal in both endpoints in one connection.
+    /// `output` is the callback object for writing.
+    ///
+    /// `conv` represents conversation.
+    pub fn new_stream(conv: u32, output: Output) -> Self {
+        Kcp::construct(conv, output, true)
+    }
+
+    fn construct(conv: u32, output: Output, stream: bool) -> Self {
         Kcp {
             conv: conv,
             snd_una: 0,
@@ -237,7 +247,7 @@ impl<Output: Write> Kcp<Output> {
             incr: 0,
             fastresend: 0,
             nocwnd: false,
-            stream: false,
+            stream: stream,
 
             snd_wnd: KCP_WND_SND,
             rcv_wnd: KCP_WND_RCV,
@@ -255,14 +265,8 @@ impl<Output: Write> Kcp<Output> {
             interval: KCP_INTERVAL,
             ts_flush: KCP_INTERVAL,
             ssthresh: KCP_THRESH_INIT,
-            expired: false,
             output: KcpOutput(output),
         }
-    }
-
-    /// Set expired
-    pub fn expired(&mut self) {
-        self.expired = true;
     }
 
     /// Check buffer size without actually consuming it
@@ -294,10 +298,6 @@ impl<Output: Write> Kcp<Output> {
 
     /// Receive data from buffer
     pub fn recv(&mut self, buf: &mut [u8]) -> KcpResult<usize> {
-        if self.expired {
-            return Ok(0);
-        }
-
         if self.rcv_queue.is_empty() {
             return Err(Error::RecvQueueEmpty);
         }
@@ -481,6 +481,7 @@ impl<Output: Write> Kcp<Output> {
         }
     }
 
+    #[inline]
     fn ack_push(&mut self, sn: u32, ts: u32) {
         self.acklist.push_back((sn, ts));
     }
@@ -524,22 +525,6 @@ impl<Output: Write> Kcp<Output> {
             let seg = self.rcv_buf.pop_front().unwrap();
             self.rcv_queue.push_back(seg);
         }
-        // let mut index = 0;
-        // let mut nrcv_que = self.rcv_queue.len();
-        // for seg in &self.rcv_buf {
-        //     if seg.sn == self.rcv_nxt && nrcv_que < self.rcv_wnd as usize {
-        //         nrcv_que += 1;
-        //         self.rcv_nxt += 1;
-        //         index += 1;
-        //     } else {
-        //         break;
-        //     }
-        // }
-        // if index > 0 {
-        //     let new_rcv_buf = self.rcv_buf.split_off(index);
-        //     self.rcv_queue.append(&mut self.rcv_buf);
-        //     self.rcv_buf = new_rcv_buf;
-        // }
     }
 
     /// Call this when you received a packet from raw connection
@@ -1074,11 +1059,6 @@ impl<Output: Write> Kcp<Output> {
     /// KCP header size
     pub fn header_len() -> usize {
         KCP_OVERHEAD as usize
-    }
-
-    /// Enable stream mode
-    pub fn set_stream(&mut self, s: bool) {
-        self.stream = s;
     }
 
     /// Enabled stream or not
