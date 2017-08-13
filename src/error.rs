@@ -46,13 +46,11 @@ impl StdError for Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match *self {
-            Error::ConvInconsistent(ref s, ref o) => {
-                write!(f, "segment's conv number is inconsistent, our's is {}, the other's is {}", *s, *o)
-            }
+            Error::ConvInconsistent(ref s, ref o) => write!(f, "conv inconsistent, expected {}, found {}", *s, *o),
             Error::InvalidMtu(ref e) => write!(f, "invalid mtu {}", *e),
             Error::InvalidSegmentSize(ref e) => write!(f, "invalid segment size of {}", *e),
             Error::InvalidSegmentDataSize(ref s, ref o) => {
-                write!(f, "segment's data size is invalid, size in header is {}, the actual size is {}", *s, *o)
+                write!(f, "invalid segment data size, expected {}, found {}", *s, *o)
             }
             Error::IoError(ref e) => e.fmt(f),
             Error::UnsupportCmd(ref e) => write!(f, "cmd {} is not supported", *e),
