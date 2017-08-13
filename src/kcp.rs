@@ -724,7 +724,7 @@ impl<Output: Write> Kcp<Output> {
         // flush acknowledges
         // while let Some((sn, ts)) = self.acklist.pop_front() {
         for &(sn, ts) in &self.acklist {
-            if self.buf.remaining_mut() + KCP_OVERHEAD > self.mtu as usize {
+            if self.buf.len() + KCP_OVERHEAD > self.mtu as usize {
                 self.output.write_all(&self.buf)?;
                 self.buf.clear();
             }
@@ -766,7 +766,7 @@ impl<Output: Write> Kcp<Output> {
         // flush window probing commands
         if (self.probe & KCP_ASK_SEND) != 0 {
             segment.cmd = KCP_CMD_WASK;
-            if self.buf.remaining_mut() + KCP_OVERHEAD > self.mtu as usize {
+            if self.buf.len() + KCP_OVERHEAD > self.mtu as usize {
                 self.output.write_all(&self.buf)?;
                 self.buf.clear();
             }
@@ -776,7 +776,7 @@ impl<Output: Write> Kcp<Output> {
         // flush window probing commands
         if (self.probe & KCP_ASK_TELL) != 0 {
             segment.cmd = KCP_CMD_WINS;
-            if self.buf.remaining_mut() + KCP_OVERHEAD > self.mtu as usize {
+            if self.buf.len() + KCP_OVERHEAD > self.mtu as usize {
                 self.output.write_all(&self.buf)?;
                 self.buf.clear();
             }
@@ -880,7 +880,7 @@ impl<Output: Write> Kcp<Output> {
 
                 let need = KCP_OVERHEAD + snd_segment.data.len();
 
-                if self.buf.remaining_mut() + need > self.mtu as usize {
+                if self.buf.len() + need > self.mtu as usize {
                     self.output.write_all(&self.buf)?;
                     self.buf.clear();
                 }
@@ -894,7 +894,7 @@ impl<Output: Write> Kcp<Output> {
         }
 
         // Flush all data in buffer
-        if self.buf.remaining_mut() > 0 {
+        if !self.buf.is_empty() {
             self.output.write_all(&self.buf)?;
             self.buf.clear();
         }
