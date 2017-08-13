@@ -543,6 +543,12 @@ impl<Output: Write> Kcp<Output> {
         self.input_conv = true;
     }
 
+    /// Check if Kcp is waiting for the next input
+    #[inline]
+    pub fn waiting_conv(&self) -> bool {
+        self.input_conv
+    }
+
     /// Set `conv` value
     #[inline]
     pub fn set_conv(&mut self, conv: u32) {
