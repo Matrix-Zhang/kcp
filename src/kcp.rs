@@ -720,7 +720,7 @@ impl<Output: Write> Kcp<Output> {
         }
     }
 
-    fn flush_ack(&mut self, segment: &mut KcpSegment) -> KcpResult<()> {
+    fn _flush_ack(&mut self, segment: &mut KcpSegment) -> KcpResult<()> {
         // flush acknowledges
         // while let Some((sn, ts)) = self.acklist.pop_front() {
         for &(sn, ts) in &self.acklist {
@@ -788,6 +788,22 @@ impl<Output: Write> Kcp<Output> {
         Ok(())
     }
 
+    /// Flush pending ACKs
+    pub fn flush_ack(&mut self) -> KcpResult<()> {
+        if !self.updated {
+            debug!("flush updated() must be called at least once");
+            return Err(Error::NeedUpdate);
+        }
+
+        let mut segment = KcpSegment::default();
+        segment.conv = self.conv;
+        segment.cmd = KCP_CMD_ACK;
+        segment.wnd = self.wnd_unused();
+        segment.una = self.rcv_nxt;
+
+        self._flush_ack(&mut segment)
+    }
+
     /// Flush pending data in buffer.
     pub fn flush(&mut self) -> KcpResult<()> {
         if !self.updated {
@@ -801,7 +817,7 @@ impl<Output: Write> Kcp<Output> {
         segment.wnd = self.wnd_unused();
         segment.una = self.rcv_nxt;
 
-        self.flush_ack(&mut segment)?;
+        self._flush_ack(&mut segment)?;
         self.probe_wnd_size();
         self.flush_probe_commands(&mut segment)?;
 
