@@ -383,7 +383,7 @@ impl<Output: Write> Kcp<Output> {
                 }
 
                 if buf.is_empty() {
-                    return Ok(1);
+                    return Ok(sent_size);
                 }
             }
         }
