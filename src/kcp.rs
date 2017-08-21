@@ -1020,9 +1020,9 @@ impl<Output: Write> Kcp<Output> {
         self.mtu = mtu;
         self.mss = (self.mtu - KCP_OVERHEAD) as u32;
 
-        let additional = ((mtu + KCP_OVERHEAD) * 3) as usize - self.buf.capacity();
+        let additional = ((mtu + KCP_OVERHEAD) * 3) as isize - self.buf.capacity() as isize;
         if additional > 0 {
-            self.buf.reserve(additional);
+            self.buf.reserve(additional as usize);
         }
 
         Ok(())
