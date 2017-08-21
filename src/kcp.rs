@@ -288,7 +288,7 @@ impl<Output: Write> Kcp<Output> {
                 }
 
                 if self.rcv_queue.len() < (segment.frg + 1) as usize {
-                    return Err(Error::UnexpectedEof);
+                    return Err(Error::ExpectingFragment);
                 }
 
                 let mut len = 0;
