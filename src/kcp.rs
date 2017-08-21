@@ -1125,4 +1125,9 @@ impl<Output: Write> Kcp<Output> {
     pub fn is_stream(&self) -> bool {
         self.stream
     }
+
+    /// Maximum Segment Size
+    pub fn mss(&self) -> u32 {
+        self.mss
+    }
 }
