@@ -374,6 +374,8 @@ impl<Output: Write> Kcp<Output> {
                     let capacity = self.mss as usize - l;
                     let extend = cmp::min(buf.len(), capacity);
 
+                    trace!("send stream mss={} last length={} extend={}", self.mss, l, extend);
+
                     let (lf, rt) = buf.split_at(extend);
                     old.data.extend_from_slice(lf);
                     buf = rt;
