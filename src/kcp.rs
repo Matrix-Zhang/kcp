@@ -253,7 +253,7 @@ impl<Output: Write> Kcp<Output> {
             updated: false,
             ts_probe: 0,
             probe_wait: 0,
-            dead_link: 0,
+            dead_link: 10,
             incr: 0,
             fastresend: 0,
             nocwnd: false,
@@ -1129,5 +1129,15 @@ impl<Output: Write> Kcp<Output> {
     /// Maximum Segment Size
     pub fn mss(&self) -> u32 {
         self.mss
+    }
+
+    /// Set maximum resend times
+    pub fn set_maximum_resend_times(&mut self, dead_link: u32) {
+        self.dead_link = dead_link;
+    }
+
+    /// Check if KCP connection is dead (resend times excceeded)
+    pub fn is_dead_link(&self) -> bool {
+        self.state != 0
     }
 }
