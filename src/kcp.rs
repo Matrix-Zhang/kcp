@@ -22,7 +22,7 @@ const KCP_ASK_SEND: u32 = 1;
 const KCP_ASK_TELL: u32 = 2;
 
 const KCP_WND_SND: u16 = 32;
-const KCP_WND_RCV: u16 = 32;
+const KCP_WND_RCV: u16 = 128;
 
 const KCP_MTU_DEF: usize = 1400;
 // const KCP_ACK_FAST: u32 = 3;
@@ -396,7 +396,7 @@ impl<Output: Write> Kcp<Output> {
             (buf.len() + self.mss as usize - 1) / self.mss as usize
         };
 
-        if count > 255 {
+        if count >= KCP_WND_RCV as usize {
             debug!("send bufsize={} mss={} too large", buf.len(), self.mss);
             return Err(Error::UserBufTooBig);
         }
@@ -1087,7 +1087,7 @@ impl<Output: Write> Kcp<Output> {
         }
 
         if rcvwnd > 0 {
-            self.rcv_wnd = rcvwnd as u16;
+            self.rcv_wnd = cmp::max(rcvwnd, KCP_WND_RCV) as u16;
         }
     }
 
