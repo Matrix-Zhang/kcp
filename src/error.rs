@@ -35,7 +35,7 @@ impl StdError for Error {
         }
     }
 
-    fn cause(&self) -> Option<&StdError> {
+    fn cause(&self) -> Option<&dyn StdError> {
         match *self {
             Error::IoError(ref e) => Some(e),
             _ => None,
@@ -54,14 +54,14 @@ impl fmt::Display for Error {
             }
             Error::IoError(ref e) => e.fmt(f),
             Error::UnsupportCmd(ref e) => write!(f, "cmd {} is not supported", *e),
-            ref e => write!(f, "{}", e.description()),
+            ref e => write!(f, "{}", e),
         }
     }
 }
 
 fn make_io_error<T>(kind: ErrorKind, msg: T) -> io::Error
 where
-    T: Into<Box<StdError + Send + Sync>>,
+    T: Into<Box<dyn StdError + Send + Sync>>,
 {
     io::Error::new(kind, msg)
 }
