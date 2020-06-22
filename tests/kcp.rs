@@ -289,9 +289,9 @@ fn run(mode: TestMode, msgcount: u32, lostrate: u32) {
         // kcp1 send packet every 20ms
         while current >= slap {
             let mut buf = BytesMut::with_capacity(8);
-            buf.put_u32::<LittleEndian>(index);
+            buf.put_u32_le(index);
             index += 1;
-            buf.put_u32::<LittleEndian>(current);
+            buf.put_u32_le(current);
 
             kcp1.send(&buf).unwrap();
             // println!("SENT curr: {} {} {:?}", index, current, &buf[..]);
@@ -341,8 +341,8 @@ fn run(mode: TestMode, msgcount: u32, lostrate: u32) {
                 Ok(n) => {
                     let mut cur = Cursor::new(&buf[..n]);
 
-                    let sn = cur.get_u32::<LittleEndian>();
-                    let ts = cur.get_u32::<LittleEndian>();
+                    let sn = cur.get_u32_le();
+                    let ts = cur.get_u32_le();
                     // println!("[RECV] sn={} ts={}", sn, ts);
                     let rtt = current - ts;
 

@@ -98,14 +98,14 @@ impl KcpSegment {
             panic!("REMAIN {} encoded {} {:?}", buf.remaining_mut(), self.encoded_len(), self);
         }
 
-        buf.put_u32::<LittleEndian>(self.conv);
+        buf.put_u32_le(self.conv);
         buf.put(self.cmd);
         buf.put(self.frg);
-        buf.put_u16::<LittleEndian>(self.wnd);
-        buf.put_u32::<LittleEndian>(self.ts);
-        buf.put_u32::<LittleEndian>(self.sn);
-        buf.put_u32::<LittleEndian>(self.una);
-        buf.put_u32::<LittleEndian>(self.data.len() as u32);
+        buf.put_u16_le(self.wnd);
+        buf.put_u32_le(self.ts);
+        buf.put_u32_le(self.sn);
+        buf.put_u32_le(self.una);
+        buf.put_u32_le(self.data.len() as u32);
         buf.put_slice(&self.data);
     }
 
@@ -580,7 +580,7 @@ impl<Output: Write> Kcp<Output> {
 
         let mut buf = Cursor::new(buf);
         while buf.remaining() >= KCP_OVERHEAD as usize {
-            let conv = buf.get_u32::<LittleEndian>();
+            let conv = buf.get_u32_le();
             if conv != self.conv {
                 // This allows getting conv from this call, which allows us to allocate
                 // conv from the server side.
@@ -596,11 +596,11 @@ impl<Output: Write> Kcp<Output> {
 
             let cmd = buf.get_u8();
             let frg = buf.get_u8();
-            let wnd = buf.get_u16::<LittleEndian>();
-            let ts = buf.get_u32::<LittleEndian>();
-            let sn = buf.get_u32::<LittleEndian>();
-            let una = buf.get_u32::<LittleEndian>();
-            let len = buf.get_u32::<LittleEndian>() as usize;
+            let wnd = buf.get_u16_le();
+            let ts = buf.get_u32_le();
+            let sn = buf.get_u32_le();
+            let una = buf.get_u32_le();
+            let len = buf.get_u32_le() as usize;
 
             if buf.remaining() < len as usize {
                 debug!("input bufsize={} payload length={} remaining={} not match", input_size, len, buf.remaining());
