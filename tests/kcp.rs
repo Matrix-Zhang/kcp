@@ -1,8 +1,8 @@
-extern crate kcp;
 extern crate bytes;
+extern crate env_logger;
+extern crate kcp;
 extern crate rand;
 extern crate time;
-extern crate env_logger;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -11,21 +11,20 @@ use std::rc::Rc;
 use std::thread::sleep;
 use std::time::Duration;
 
-use bytes::{Bytes, BytesMut, LittleEndian};
-use bytes::buf::{Buf, BufMut, IntoBuf};
-use time::Timespec;
+use bytes::buf::{Buf, BufMut};
+use bytes::BytesMut;
 
 use kcp::Kcp;
 
 #[derive(Debug)]
 struct DelayPacket {
-    buf: Bytes,
+    buf: BytesMut,
     ts: u32,
 }
 
 impl DelayPacket {
-    fn new(buf: Bytes) -> DelayPacket {
-        DelayPacket { buf: buf, ts: 0 }
+    fn new(buf: BytesMut) -> DelayPacket {
+        DelayPacket { buf, ts: 0 }
     }
 
     fn len(&self) -> usize {
@@ -40,8 +39,8 @@ impl DelayPacket {
         self.ts = ts;
     }
 
-    fn reader(self) -> Cursor<Bytes> {
-        self.buf.into_buf()
+    fn reader(self) -> Cursor<BytesMut> {
+        Cursor::new(self.buf)
     }
 }
 
@@ -81,14 +80,8 @@ impl Random {
 }
 
 #[inline]
-fn as_millisec(timespec: &Timespec) -> u32 {
-    (timespec.sec * 1000 + timespec.nsec as i64 / 1000 / 1000) as u32
-}
-
-#[inline]
 fn current() -> u32 {
-    let timespec = time::get_time();
-    as_millisec(&timespec)
+    (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1000000) as u32
 }
 
 struct LatencySimulator {
@@ -111,7 +104,7 @@ impl LatencySimulator {
             lostrate: lostrate / 2,
             rttmin: rttmin / 2,
             rttmax: rttmax / 2,
-            nmax: nmax,
+            nmax,
             tx1: 0,
             tx2: 0,
             current: ::current(),
@@ -122,29 +115,29 @@ impl LatencySimulator {
         }
     }
 
-    fn send(&mut self, peer: u32, data: &[u8]) -> io::Result<usize> {
+    fn send(&mut self, peer: u32, data: &[u8]) -> usize {
         // println!("[VNET] SEND {} {:?}", peer, data);
         if peer == 0 {
             self.tx1 += 1;
 
             if self.r12.random() < self.lostrate {
-                return Ok(data.len());
+                return data.len();
             }
             if self.p12.len() >= self.nmax {
-                return Ok(data.len());
+                return data.len();
             }
         } else {
             self.tx2 += 1;
 
             if self.r21.random() < self.lostrate {
-                return Ok(data.len());
+                return data.len();
             }
             if self.p21.len() >= self.nmax {
-                return Ok(data.len());
+                return data.len();
             }
         }
 
-        let mut pkg = DelayPacket::new(Bytes::from(data));
+        let mut pkg = DelayPacket::new(BytesMut::from(data));
         self.current = ::current();
 
         let mut delay = self.rttmin;
@@ -153,7 +146,6 @@ impl LatencySimulator {
         }
 
         pkg.set_ts(self.current + delay);
-        // println!("[VNET] ACTUAL SEND {:?}", pkg);
 
         if peer == 0 {
             self.p12.push_back(pkg);
@@ -161,7 +153,7 @@ impl LatencySimulator {
             self.p21.push_back(pkg);
         }
 
-        Ok(data.len())
+        data.len()
     }
 
     fn recv(&mut self, peer: u32, data: &mut [u8]) -> io::Result<usize> {
@@ -188,7 +180,10 @@ impl LatencySimulator {
             }
 
             if data.len() < pkg.len() {
-                return Err(io::Error::new(ErrorKind::InvalidInput, "Buffer is too small"));
+                return Err(io::Error::new(
+                    ErrorKind::InvalidInput,
+                    "Buffer is too small",
+                ));
             }
         }
 
@@ -200,10 +195,6 @@ impl LatencySimulator {
 
         pkg.reader().read(data)
     }
-
-    fn tx1(&self) -> u32 {
-        self.tx1
-    }
 }
 
 struct KcpOutput {
@@ -214,7 +205,7 @@ struct KcpOutput {
 impl Write for KcpOutput {
     fn write(&mut self, data: &[u8]) -> io::Result<usize> {
         let mut sim = self.sim.borrow_mut();
-        sim.send(self.peer, data)
+        Ok(sim.send(self.peer, data))
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -234,22 +225,25 @@ fn run(mode: TestMode, msgcount: u32, lostrate: u32) {
     let vnet = LatencySimulator::new(lostrate, 60, 125, 1000);
     let vnet = Rc::new(RefCell::new(vnet));
 
-    let mut kcp1 = Kcp::new(0x11223344,
-                            KcpOutput {
-                                sim: vnet.clone(),
-                                peer: 0,
-                            });
-    let mut kcp2 = Kcp::new(0x11223344,
-                            KcpOutput {
-                                sim: vnet.clone(),
-                                peer: 1,
-                            });
+    let mut kcp1 = Kcp::new(
+        0x11223344,
+        KcpOutput {
+            sim: vnet.clone(),
+            peer: 0,
+        },
+    );
+    let mut kcp2 = Kcp::new(
+        0x11223344,
+        KcpOutput {
+            sim: vnet.clone(),
+            peer: 1,
+        },
+    );
 
     let mut current = ::current();
     let mut slap = current + 20;
     let mut index = 0;
     let mut next = 0;
-    let mut sumrtt = 0;
     let mut count = 0;
     let mut maxrtt = 0;
 
@@ -276,7 +270,7 @@ fn run(mode: TestMode, msgcount: u32, lostrate: u32) {
         }
     }
 
-    let mut ts1 = ::current();
+    // let mut ts1 = ::current();
 
     let mut buf = [0u8; 2000];
     while next <= msgcount {
@@ -289,9 +283,9 @@ fn run(mode: TestMode, msgcount: u32, lostrate: u32) {
         // kcp1 send packet every 20ms
         while current >= slap {
             let mut buf = BytesMut::with_capacity(8);
-            buf.put_u32::<LittleEndian>(index);
+            buf.put_u32_le(index);
             index += 1;
-            buf.put_u32::<LittleEndian>(current);
+            buf.put_u32_le(current);
 
             kcp1.send(&buf).unwrap();
             // println!("SENT curr: {} {} {:?}", index, current, &buf[..]);
@@ -341,66 +335,61 @@ fn run(mode: TestMode, msgcount: u32, lostrate: u32) {
                 Ok(n) => {
                     let mut cur = Cursor::new(&buf[..n]);
 
-                    let sn = cur.get_u32::<LittleEndian>();
-                    let ts = cur.get_u32::<LittleEndian>();
+                    let sn = cur.get_u32_le();
+                    let ts = cur.get_u32_le();
                     // println!("[RECV] sn={} ts={}", sn, ts);
                     let rtt = current - ts;
 
                     if sn != next {
-                        panic!("Received not continously packet: sn {} <-> {}", count, next);
+                        panic!(
+                            "Received not continuously packet: sn {} <-> {}",
+                            count, next
+                        );
                     }
 
                     next += 1;
-                    sumrtt += rtt;
                     count += 1;
 
                     if rtt > maxrtt {
                         maxrtt = rtt;
                     }
-
-                    println!("[RECV] mode={:?} sn={} rtt={}", mode, sn, rtt);
                 }
             }
         }
     }
-
-    ts1 = ::current() - ts1;
-    println!("{:?} mode result ({}ms):", mode, ts1);
-    println!("avgrtt={} maxrtt={} tx={}", (sumrtt / count), maxrtt, vnet.borrow().tx1());
 }
 
-#[test]
-fn kcp_default() {
-    let _ = env_logger::init();
-    run(TestMode::Default, 1000, 10);
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-#[test]
-fn kcp_normal() {
-    let _ = env_logger::init();
-    run(TestMode::Normal, 1000, 10);
-}
+    #[test]
+    fn kcp_default() {
+        run(TestMode::Default, 1000, 10);
+    }
 
-#[test]
-fn kcp_fast() {
-    let _ = env_logger::init();
-    run(TestMode::Fast, 1000, 10);
-}
+    #[test]
+    fn kcp_normal() {
+        run(TestMode::Normal, 1000, 10);
+    }
 
-#[test]
-fn kcp_massive_lost_default() {
-    let _ = env_logger::init();
-    run(TestMode::Default, 1000, 50);
-}
+    #[test]
+    fn kcp_fast() {
+        run(TestMode::Fast, 1000, 10);
+    }
 
-#[test]
-fn kcp_massive_lost_normal() {
-    let _ = env_logger::init();
-    run(TestMode::Normal, 1000, 50);
-}
+    #[test]
+    fn kcp_massive_lost_default() {
+        run(TestMode::Default, 1000, 50);
+    }
 
-#[test]
-fn kcp_massive_lost_fast() {
-    let _ = env_logger::init();
-    run(TestMode::Fast, 1000, 50);
+    #[test]
+    fn kcp_massive_lost_normal() {
+        run(TestMode::Normal, 1000, 50);
+    }
+
+    #[test]
+    fn kcp_massive_lost_fast() {
+        run(TestMode::Fast, 1000, 50);
+    }
 }
