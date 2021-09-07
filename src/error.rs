@@ -13,7 +13,7 @@ pub enum Error {
     NeedUpdate,
     RecvQueueEmpty,
     ExpectingFragment,
-    UnsupportCmd(u8),
+    UnsupportedCmd(u8),
     UserBufTooBig,
     UserBufTooSmall,
 }
@@ -46,11 +46,17 @@ impl StdError for Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match *self {
-            Error::ConvInconsistent(ref s, ref o) => write!(f, "conv inconsistent, expected {}, found {}", *s, *o),
+            Error::ConvInconsistent(ref s, ref o) => {
+                write!(f, "conv inconsistent, expected {}, found {}", *s, *o)
+            }
             Error::InvalidMtu(ref e) => write!(f, "invalid mtu {}", *e),
             Error::InvalidSegmentSize(ref e) => write!(f, "invalid segment size of {}", *e),
             Error::InvalidSegmentDataSize(ref s, ref o) => {
-                write!(f, "invalid segment data size, expected {}, found {}", *s, *o)
+                write!(
+                    f,
+                    "invalid segment data size, expected {}, found {}",
+                    *s, *o
+                )
             }
             Error::IoError(ref e) => e.fmt(f),
             Error::UnsupportCmd(ref e) => write!(f, "cmd {} is not supported", *e),
@@ -72,12 +78,12 @@ impl From<Error> for io::Error {
             Error::ConvInconsistent(..) => ErrorKind::Other,
             Error::InvalidMtu(..) => ErrorKind::Other,
             Error::InvalidSegmentSize(..) => ErrorKind::Other,
-            Error::InvalidSegmentDataSize(..) => ErrorKind::Other, 
+            Error::InvalidSegmentDataSize(..) => ErrorKind::Other,
             Error::IoError(err) => return err,
             Error::NeedUpdate => ErrorKind::Other,
             Error::RecvQueueEmpty => ErrorKind::WouldBlock,
             Error::ExpectingFragment => ErrorKind::WouldBlock,
-            Error::UnsupportCmd(..) => ErrorKind::Other,
+            Error::UnsupportedCmd(..) => ErrorKind::Other,
             Error::UserBufTooBig => ErrorKind::Other,
             Error::UserBufTooSmall => ErrorKind::Other,
         };

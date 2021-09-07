@@ -1,12 +1,13 @@
 //! KCP
 
 use std::cmp;
+use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::io::{self, Cursor, Read, Write};
 
-use KcpResult;
-use bytes::{Buf, BufMut, ByteOrder, BytesMut, LittleEndian};
+use bytes::{Buf, BufMut, BytesMut};
 use error::Error;
+use KcpResult;
 
 const KCP_RTO_NDL: u32 = 30;
 const KCP_RTO_MIN: u32 = 100;
@@ -38,15 +39,15 @@ const KCP_PROBE_INIT: u32 = 7000;
 const KCP_PROBE_LIMIT: u32 = 120000;
 
 /// Read `conv` from raw buffer
-pub fn get_conv(buf: &[u8]) -> u32 {
+pub fn get_conv(mut buf: &[u8]) -> u32 {
     assert!(buf.len() >= KCP_OVERHEAD);
-    LittleEndian::read_u32(buf)
+    buf.get_u32_le()
 }
 
 /// Set `conv` to raw buffer
-pub fn set_conv(buf: &mut [u8], conv: u32) {
+pub fn set_conv(mut buf: &mut [u8], conv: u32) {
     assert!(buf.len() >= KCP_OVERHEAD);
-    LittleEndian::write_u32(buf, conv)
+    buf.put_u32_le(conv)
 }
 
 #[inline]
@@ -89,13 +90,18 @@ impl KcpSegment {
             rto: 0,
             fastack: 0,
             xmit: 0,
-            data: data,
+            data,
         }
     }
 
     fn encode(&self, buf: &mut BytesMut) {
         if buf.remaining_mut() < self.encoded_len() {
-            panic!("REMAIN {} encoded {} {:?}", buf.remaining_mut(), self.encoded_len(), self);
+            panic!(
+                "REMAIN {} encoded {} {:?}",
+                buf.remaining_mut(),
+                self.encoded_len(),
+                self
+            );
         }
 
         buf.put_u32_le(self.conv);
@@ -238,7 +244,7 @@ impl<Output: Write> Kcp<Output> {
 
     fn construct(conv: u32, output: Output, stream: bool) -> Self {
         Kcp {
-            conv: conv,
+            conv,
             snd_una: 0,
             snd_nxt: 0,
             rcv_nxt: 0,
@@ -257,7 +263,7 @@ impl<Output: Write> Kcp<Output> {
             incr: 0,
             fastresend: 0,
             nocwnd: false,
-            stream: stream,
+            stream,
             snd_wnd: KCP_WND_SND,
             rcv_wnd: KCP_WND_RCV,
             rmt_wnd: KCP_WND_RCV,
@@ -306,6 +312,24 @@ impl<Output: Write> Kcp<Output> {
         }
     }
 
+    // move available data from rcv_buf -> rcv_queue
+    pub fn move_buf(&mut self) {
+        while !self.rcv_buf.is_empty() {
+            let nrcv_que = self.rcv_queue.len();
+            {
+                let seg = &self.rcv_buf[0];
+                if seg.sn == self.rcv_nxt && nrcv_que < self.rcv_wnd as usize {
+                    self.rcv_nxt += 1;
+                } else {
+                    break;
+                }
+            }
+
+            let seg = self.rcv_buf.pop_front().unwrap();
+            self.rcv_queue.push_back(seg);
+        }
+    }
+
     /// Receive data from buffer
     pub fn recv(&mut self, buf: &mut [u8]) -> KcpResult<usize> {
         if self.rcv_queue.is_empty() {
@@ -334,21 +358,7 @@ impl<Output: Write> Kcp<Output> {
         }
         assert_eq!(cur.position() as usize, peeksize);
 
-        // move available data from rcv_buf -> rcv_queue
-        while !self.rcv_buf.is_empty() {
-            let nrcv_que = self.rcv_queue.len();
-            {
-                let seg = &self.rcv_buf[0];
-                if seg.sn == self.rcv_nxt && nrcv_que < self.rcv_wnd as usize {
-                    self.rcv_nxt += 1;
-                } else {
-                    break;
-                }
-            }
-
-            let seg = self.rcv_buf.pop_front().unwrap();
-            self.rcv_queue.push_back(seg);
-        }
+        self.move_buf();
 
         // fast recover
         if self.rcv_queue.len() < self.rcv_wnd as usize && recover {
@@ -374,7 +384,12 @@ impl<Output: Write> Kcp<Output> {
                     let capacity = self.mss as usize - l;
                     let extend = cmp::min(buf.len(), capacity);
 
-                    trace!("send stream mss={} last length={} extend={}", self.mss, l, extend);
+                    trace!(
+                        "send stream mss={} last length={} extend={}",
+                        self.mss,
+                        l,
+                        extend
+                    );
 
                     let (lf, rt) = buf.split_at(extend);
                     old.data.extend_from_slice(lf);
@@ -459,11 +474,12 @@ impl<Output: Write> Kcp<Output> {
         }
 
         for i in 0..self.snd_buf.len() {
-            if sn == self.snd_buf[i].sn {
-                self.snd_buf.remove(i);
-                break;
-            } else if sn < self.snd_buf[i].sn {
-                break;
+            match sn.cmp(&self.snd_buf[i].sn) {
+                Ordering::Equal => {
+                    self.snd_buf.remove(i);
+                }
+                Ordering::Less => break,
+                _ => (),
             }
         }
     }
@@ -523,20 +539,7 @@ impl<Output: Write> Kcp<Output> {
         }
 
         // move available data from rcv_buf -> rcv_queue
-        while !self.rcv_buf.is_empty() {
-            let nrcv_que = self.rcv_queue.len();
-            {
-                let seg = &self.rcv_buf[0];
-                if seg.sn == self.rcv_nxt && nrcv_que < self.rcv_wnd as usize {
-                    self.rcv_nxt += 1;
-                } else {
-                    break;
-                }
-            }
-
-            let seg = self.rcv_buf.pop_front().unwrap();
-            self.rcv_queue.push_back(seg);
-        }
+        self.move_buf();
     }
 
     /// Get `conv` from the next `input` call
@@ -570,7 +573,11 @@ impl<Output: Write> Kcp<Output> {
         trace!("[RI] {} bytes", buf.len());
 
         if buf.len() < KCP_OVERHEAD {
-            debug!("input bufsize={} too small, at least {}", buf.len(), KCP_OVERHEAD);
+            debug!(
+                "input bufsize={} too small, at least {}",
+                buf.len(),
+                KCP_OVERHEAD
+            );
             return Err(Error::InvalidSegmentSize(buf.len()));
         }
 
@@ -603,7 +610,12 @@ impl<Output: Write> Kcp<Output> {
             let len = buf.get_u32_le() as usize;
 
             if buf.remaining() < len as usize {
-                debug!("input bufsize={} payload length={} remaining={} not match", input_size, len, buf.remaining());
+                debug!(
+                    "input bufsize={} payload length={} remaining={} not match",
+                    input_size,
+                    len,
+                    buf.remaining()
+                );
                 return Err(Error::InvalidSegmentDataSize(len, buf.remaining()));
             }
 
@@ -611,7 +623,7 @@ impl<Output: Write> Kcp<Output> {
                 KCP_CMD_PUSH | KCP_CMD_ACK | KCP_CMD_WASK | KCP_CMD_WINS => {}
                 _ => {
                     debug!("input cmd={} unrecognized", cmd);
-                    return Err(Error::UnsupportCmd(cmd));
+                    return Err(Error::UnsupportedCmd(cmd));
                 }
             }
 
@@ -638,7 +650,12 @@ impl<Output: Write> Kcp<Output> {
                         max_ack = sn;
                     }
 
-                    trace!("input ack: sn={} rtt={} rto={}", sn, timediff(self.current, ts), self.rx_rto);
+                    trace!(
+                        "input ack: sn={} rtt={} rto={}",
+                        sn,
+                        timediff(self.current, ts),
+                        self.rx_rto
+                    );
                 }
                 KCP_CMD_PUSH => {
                     trace!("input psh: sn={} ts={}", sn, ts);
@@ -689,25 +706,23 @@ impl<Output: Write> Kcp<Output> {
             self.parse_fastack(max_ack);
         }
 
-        if self.snd_una > old_una {
-            if self.cwnd < self.rmt_wnd {
-                let mss = self.mss;
-                if self.cwnd < self.ssthresh {
+        if self.snd_una > old_una && self.cwnd < self.rmt_wnd {
+            let mss = self.mss;
+            if self.cwnd < self.ssthresh {
+                self.cwnd += 1;
+                self.incr += mss;
+            } else {
+                if self.incr < mss {
+                    self.incr = mss;
+                }
+                self.incr += (mss * mss) / self.incr + (mss / 16);
+                if (self.cwnd + 1) as u32 * mss <= self.incr {
                     self.cwnd += 1;
-                    self.incr += mss;
-                } else {
-                    if self.incr < mss {
-                        self.incr = mss;
-                    }
-                    self.incr += (mss * mss) / self.incr + (mss / 16);
-                    if (self.cwnd + 1) as u32 * mss <= self.incr {
-                        self.cwnd += 1;
-                    }
                 }
-                if self.cwnd > self.rmt_wnd {
-                    self.cwnd = self.rmt_wnd;
-                    self.incr = self.rmt_wnd as u32 * mss;
-                }
+            }
+            if self.cwnd > self.rmt_wnd {
+                self.cwnd = self.rmt_wnd;
+                self.incr = self.rmt_wnd as u32 * mss;
             }
         }
 
@@ -746,17 +761,15 @@ impl<Output: Write> Kcp<Output> {
                 self.probe_wait = KCP_PROBE_INIT;
                 self.ts_probe = self.current + self.probe_wait;
             } else {
-                if timediff(self.current, self.ts_probe) >= 0 {
-                    if self.probe_wait < KCP_PROBE_INIT {
-                        self.probe_wait = KCP_PROBE_INIT;
-                    }
-                    self.probe_wait += self.probe_wait / 2;
-                    if self.probe_wait > KCP_PROBE_LIMIT {
-                        self.probe_wait = KCP_PROBE_LIMIT;
-                    }
-                    self.ts_probe = self.current + self.probe_wait;
-                    self.probe |= KCP_ASK_SEND;
+                if timediff(self.current, self.ts_probe) >= 0 && self.probe_wait < KCP_PROBE_INIT {
+                    self.probe_wait = KCP_PROBE_INIT;
                 }
+                self.probe_wait += self.probe_wait / 2;
+                if self.probe_wait > KCP_PROBE_LIMIT {
+                    self.probe_wait = KCP_PROBE_LIMIT;
+                }
+                self.ts_probe = self.current + self.probe_wait;
+                self.probe |= KCP_ASK_SEND;
             }
         } else {
             self.ts_probe = 0;
@@ -764,29 +777,27 @@ impl<Output: Write> Kcp<Output> {
         }
     }
 
+    fn _flush_probe_commands(&mut self, cmd: u8, segment: &mut KcpSegment) -> KcpResult<()> {
+        segment.cmd = cmd;
+        if self.buf.len() + KCP_OVERHEAD > self.mtu as usize {
+            self.output.write_all(&self.buf)?;
+            self.buf.clear();
+        }
+        segment.encode(&mut self.buf);
+        Ok(())
+    }
+
     fn flush_probe_commands(&mut self, segment: &mut KcpSegment) -> KcpResult<()> {
         // flush window probing commands
         if (self.probe & KCP_ASK_SEND) != 0 {
-            segment.cmd = KCP_CMD_WASK;
-            if self.buf.len() + KCP_OVERHEAD > self.mtu as usize {
-                self.output.write_all(&self.buf)?;
-                self.buf.clear();
-            }
-            segment.encode(&mut self.buf);
+            self._flush_probe_commands(KCP_CMD_WASK, segment)?;
         }
 
         // flush window probing commands
         if (self.probe & KCP_ASK_TELL) != 0 {
-            segment.cmd = KCP_CMD_WINS;
-            if self.buf.len() + KCP_OVERHEAD > self.mtu as usize {
-                self.output.write_all(&self.buf)?;
-                self.buf.clear();
-            }
-            segment.encode(&mut self.buf);
+            self._flush_probe_commands(KCP_CMD_WINS, segment)?;
         }
-
         self.probe = 0;
-
         Ok(())
     }
 
@@ -797,11 +808,13 @@ impl<Output: Write> Kcp<Output> {
             return Err(Error::NeedUpdate);
         }
 
-        let mut segment = KcpSegment::default();
-        segment.conv = self.conv;
-        segment.cmd = KCP_CMD_ACK;
-        segment.wnd = self.wnd_unused();
-        segment.una = self.rcv_nxt;
+        let mut segment = KcpSegment {
+            conv: self.conv,
+            cmd: KCP_CMD_ACK,
+            wnd: self.wnd_unused(),
+            una: self.rcv_nxt,
+            ..Default::default()
+        };
 
         self._flush_ack(&mut segment)
     }
@@ -813,11 +826,13 @@ impl<Output: Write> Kcp<Output> {
             return Err(Error::NeedUpdate);
         }
 
-        let mut segment = KcpSegment::default();
-        segment.conv = self.conv;
-        segment.cmd = KCP_CMD_ACK;
-        segment.wnd = self.wnd_unused();
-        segment.una = self.rcv_nxt;
+        let mut segment = KcpSegment {
+            conv: self.conv,
+            cmd: KCP_CMD_ACK,
+            wnd: self.wnd_unused(),
+            una: self.rcv_nxt,
+            ..Default::default()
+        };
 
         self._flush_ack(&mut segment)?;
         self.probe_wnd_size();
@@ -1013,7 +1028,6 @@ impl<Output: Write> Kcp<Output> {
     ///
     /// MTU = Maximum Transmission Unit
     pub fn set_mtu(&mut self, mtu: usize) -> KcpResult<()> {
-
         if mtu < 50 || mtu < KCP_OVERHEAD {
             debug!("set_mtu mtu={} invalid", mtu);
             return Err(Error::InvalidMtu(mtu));
@@ -1062,14 +1076,10 @@ impl<Output: Write> Kcp<Output> {
             self.rx_minrto = KCP_RTO_MIN;
         }
 
-        if interval >= 0 {
-            if interval > 5000 {
-                interval = 5000;
-            } else if interval < 10 {
-                interval = 10;
-            }
-
-            self.interval = interval as u32;
+        match interval {
+            interval if interval < 10 => self.interval = 10,
+            interval if interval > 5000 => self.interval = 5000,
+            _ => self.interval = interval
         }
 
         if resend >= 0 {

@@ -1,6 +1,6 @@
 [package]
 name = "kcp"
-version = "0.4.10"
+version = "0.4.12"
 authors = ["Matrix <113445886@qq.com>", "Y. T. Chung <zonyitoo@gmail.com>"]
 description = "Reliable-UDP Library for Rust"
 license = "MIT"
@@ -10,10 +10,10 @@ documentation = "https://docs.rs/kcp"
 repository = "https://github.com/Matrix-Zhang/kcp"
 
 [dependencies]
-bytes = "0.4"
-log = "0.3"
+bytes = "1.0"
+log = "0.4"
 
 [dev-dependencies]
-time = "0.1"
-rand = "0.3"
-env_logger = "0.4"
+time = "0.2"
+rand = "0.8"
+env_logger = "0.8"
