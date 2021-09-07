@@ -105,8 +105,8 @@ impl KcpSegment {
         }
 
         buf.put_u32_le(self.conv);
-        buf.put(self.cmd);
-        buf.put(self.frg);
+        buf.put_u8(self.cmd);
+        buf.put_u8(self.frg);
         buf.put_u16_le(self.wnd);
         buf.put_u32_le(self.ts);
         buf.put_u32_le(self.sn);
@@ -1067,7 +1067,7 @@ impl<Output: Write> Kcp<Output> {
     /// `interval`: internal update timer interval in millisec, default is 100ms
     /// `resend`: 0:disable fast resend(default), 1:enable fast resend
     /// `nc`: `false`: normal congestion control(default), `true`: disable congestion control
-    pub fn set_nodelay(&mut self, nodelay: bool, mut interval: i32, resend: i32, nc: bool) {
+    pub fn set_nodelay(&mut self, nodelay: bool, interval: i32, resend: i32, nc: bool) {
         if nodelay {
             self.nodelay = true;
             self.rx_minrto = KCP_RTO_NDL;
@@ -1079,7 +1079,7 @@ impl<Output: Write> Kcp<Output> {
         match interval {
             interval if interval < 10 => self.interval = 10,
             interval if interval > 5000 => self.interval = 5000,
-            _ => self.interval = interval
+            _ => self.interval = interval as u32,
         }
 
         if resend >= 0 {
