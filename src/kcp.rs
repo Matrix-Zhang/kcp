@@ -105,8 +105,8 @@ impl KcpSegment {
         }
 
         buf.put_u32_le(self.conv);
-        buf.put_u8(self.cmd);
-        buf.put_u8(self.frg);
+        buf.put(self.cmd);
+        buf.put(self.frg);
         buf.put_u16_le(self.wnd);
         buf.put_u32_le(self.ts);
         buf.put_u32_le(self.sn);

@@ -19,6 +19,22 @@ pub enum Error {
 }
 
 impl StdError for Error {
+    fn description(&self) -> &str {
+        match *self {
+            Error::ConvInconsistent(..) => "segment's conv number is inconsistent",
+            Error::InvalidMtu(_) => "invalid mtu size",
+            Error::InvalidSegmentSize(_) => "invalid segment size",
+            Error::InvalidSegmentDataSize(..) => "segment's data size is invalid",
+            Error::IoError(ref e) => e.description(),
+            Error::NeedUpdate => "need call kcp's update method",
+            Error::RecvQueueEmpty => "receive queue is empty",
+            Error::ExpectingFragment => "expecting other fragments",
+            Error::UnsupportCmd(_) => "cmd isn't supported",
+            Error::UserBufTooBig => "user's buffer is too big",
+            Error::UserBufTooSmall => "user's buffer is too small",
+        }
+    }
+
     fn cause(&self) -> Option<&dyn StdError> {
         match *self {
             Error::IoError(ref e) => Some(e),
@@ -43,12 +59,8 @@ impl fmt::Display for Error {
                 )
             }
             Error::IoError(ref e) => e.fmt(f),
-            Error::UnsupportedCmd(ref e) => write!(f, "cmd {} is not supported", *e),
-            Error::ExpectingFragment => write!(f, "excepting other fragments"),
-            Error::NeedUpdate => write!(f, "need call kcp's update method"),
-            Error::RecvQueueEmpty => write!(f, "receive queue is empty"),
-            Error::UserBufTooSmall => write!(f, "user's buffer is too small"),
-            Error::UserBufTooBig => write!(f, "user's buffer is too big"),
+            Error::UnsupportCmd(ref e) => write!(f, "cmd {} is not supported", *e),
+            ref e => write!(f, "{}", e),
         }
     }
 }
