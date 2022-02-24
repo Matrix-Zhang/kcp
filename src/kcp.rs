@@ -50,6 +50,12 @@ pub fn set_conv(mut buf: &mut [u8], conv: u32) {
     buf.put_u32_le(conv)
 }
 
+/// Get `sn` from raw buffer
+pub fn get_sn(buf: &[u8]) -> u32 {
+    assert!(buf.len() >= KCP_OVERHEAD);
+    (&buf[12..]).get_u32_le()
+}
+
 #[inline]
 fn bound(lower: u32, v: u32, upper: u32) -> u32 {
     cmp::min(cmp::max(lower, v), upper)
