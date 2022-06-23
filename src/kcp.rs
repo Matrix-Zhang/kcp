@@ -486,9 +486,8 @@ impl<Output: Write> Kcp<Output> {
                     self.snd_buf.remove(i);
                 }
                 Ordering::Less => break,
-                _ => (),
+                _ => i = i + 1,
             }
-            i = i + 1;
         }
     }
 
