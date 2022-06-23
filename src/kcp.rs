@@ -479,13 +479,14 @@ impl<Output: Write> Kcp<Output> {
             return;
         }
 
-        for i in 0..self.snd_buf.len() {
+        let mut i = 0 as usize;
+        while i < self.snd_buf.len() {
             match sn.cmp(&self.snd_buf[i].sn) {
                 Ordering::Equal => {
                     self.snd_buf.remove(i);
                 }
                 Ordering::Less => break,
-                _ => (),
+                _ => i = i + 1,
             }
         }
     }
