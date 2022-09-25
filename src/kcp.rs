@@ -1123,6 +1123,11 @@ impl<Output: Write> Kcp<Output> {
         self.snd_buf.len() + self.snd_queue.len()
     }
 
+    /// Get `rmt_wnd`, remote window size
+    pub fn rmt_wnd(&self) -> u16 {
+        self.rmt_wnd
+    }
+
     /// Set `rx_minrto`
     pub fn set_rx_minrto(&mut self, rto: u32) {
         self.rx_minrto = rto;
