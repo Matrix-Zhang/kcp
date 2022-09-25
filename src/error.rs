@@ -1,52 +1,35 @@
 use std::error::Error as StdError;
-use std::fmt;
 use std::io::{self, ErrorKind};
 
 /// KCP protocol errors
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("conv inconsistent, expected {0}, found {1}")]
     ConvInconsistent(u32, u32),
+    #[error("invalid mtu {0}")]
     InvalidMtu(usize),
+    #[error("invalid segment size {0}")]
     InvalidSegmentSize(usize),
+    #[error("invalid segment data size, expected {0}, found {1}")]
     InvalidSegmentDataSize(usize, usize),
-    IoError(io::Error),
+    #[error("{0}")]
+    IoError(
+        #[from]
+        #[source]
+        io::Error,
+    ),
+    #[error("need to call update() once")]
     NeedUpdate,
+    #[error("recv queue is empty")]
     RecvQueueEmpty,
+    #[error("expecting fragment")]
     ExpectingFragment,
+    #[error("command {0} is not supported")]
     UnsupportedCmd(u8),
+    #[error("user's send buffer is too big")]
     UserBufTooBig,
+    #[error("user's recv buffer is too small")]
     UserBufTooSmall,
-}
-
-impl StdError for Error {
-    fn cause(&self) -> Option<&dyn StdError> {
-        match *self {
-            Error::IoError(ref e) => Some(e),
-            _ => None,
-        }
-    }
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        match *self {
-            Error::ConvInconsistent(ref s, ref o) => {
-                write!(f, "conv inconsistent, expected {}, found {}", *s, *o)
-            }
-            Error::InvalidMtu(ref e) => write!(f, "invalid mtu {}", *e),
-            Error::InvalidSegmentSize(ref e) => write!(f, "invalid segment size of {}", *e),
-            Error::InvalidSegmentDataSize(ref s, ref o) => {
-                write!(
-                    f,
-                    "invalid segment data size, expected {}, found {}",
-                    *s, *o
-                )
-            }
-            Error::IoError(ref e) => e.fmt(f),
-            Error::UnsupportedCmd(ref e) => write!(f, "cmd {} is not supported", *e),
-            ref e => write!(f, "{}", e),
-        }
-    }
 }
 
 fn make_io_error<T>(kind: ErrorKind, msg: T) -> io::Error
@@ -73,11 +56,5 @@ impl From<Error> for io::Error {
         };
 
         make_io_error(kind, err)
-    }
-}
-
-impl From<io::Error> for Error {
-    fn from(err: io::Error) -> Error {
-        Error::IoError(err)
     }
 }
