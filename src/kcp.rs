@@ -149,7 +149,7 @@ impl<O: Write> Write for KcpOutput<O> {
 pub struct Kcp<Output: Write> {
     /// Conversation ID
     conv: u32,
-    /// Maximun Transmission Unit
+    /// Maximum Transmission Unit
     mtu: usize,
     /// Maximum Segment Size
     mss: usize,
@@ -163,7 +163,7 @@ pub struct Kcp<Output: Write> {
     /// Next packet to be received
     rcv_nxt: u32,
 
-    /// Congetion window threshole
+    /// Congestion window threshold
     ssthresh: u16,
 
     /// ACK receive variable RTT
@@ -181,7 +181,7 @@ pub struct Kcp<Output: Write> {
     rcv_wnd: u16,
     /// Remote receive window
     rmt_wnd: u16,
-    /// Congetion window
+    /// Congestion window
     cwnd: u16,
     /// Check window
     /// - IKCP_ASK_TELL, telling window size to remote
@@ -223,7 +223,7 @@ pub struct Kcp<Output: Write> {
     /// ACK number to trigger fast resend
     fastresend: u32,
     fastlimit: u32,
-    /// Disable congetion control
+    /// Disable congestion control
     nocwnd: bool,
     /// Enable stream mode
     stream: bool,
