@@ -107,7 +107,7 @@ impl LatencySimulator {
             nmax,
             tx1: 0,
             tx2: 0,
-            current: ::current(),
+            current: crate::current(),
             p12: VecDeque::new(),
             p21: VecDeque::new(),
             r12: Random::new(100),
@@ -138,7 +138,7 @@ impl LatencySimulator {
         }
 
         let mut pkg = DelayPacket::new(BytesMut::from(data));
-        self.current = ::current();
+        self.current = crate::current();
 
         let mut delay = self.rttmin;
         if self.rttmax > self.rttmin {
@@ -174,7 +174,7 @@ impl LatencySimulator {
                 }
             };
 
-            self.current = ::current();
+            self.current = crate::current();
             if self.current < pkg.ts() {
                 return Err(io::Error::new(ErrorKind::WouldBlock, "No packet yet"));
             }
@@ -240,7 +240,7 @@ fn run(mode: TestMode, msgcount: u32, lostrate: u32) {
         },
     );
 
-    let mut current = ::current();
+    let mut current = crate::current();
     let mut slap = current + 20;
     let mut index = 0;
     let mut next = 0;
@@ -276,9 +276,9 @@ fn run(mode: TestMode, msgcount: u32, lostrate: u32) {
     while next <= msgcount {
         sleep(Duration::from_millis(1));
 
-        current = ::current();
-        kcp1.update(::current()).unwrap();
-        kcp2.update(::current()).unwrap();
+        current = crate::current();
+        kcp1.update(crate::current()).unwrap();
+        kcp2.update(crate::current()).unwrap();
 
         // kcp1 send packet every 20ms
         while current >= slap {
