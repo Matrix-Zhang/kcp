@@ -3,6 +3,7 @@
 use std::cmp;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
+use std::fmt::{self, Debug};
 use std::io::{self, Cursor, Read, Write};
 
 use bytes::{Buf, BufMut, BytesMut};
@@ -232,6 +233,51 @@ pub struct Kcp<Output: Write> {
     input_conv: bool,
 
     output: KcpOutput<Output>,
+}
+
+impl<Output: Write> Debug for Kcp<Output> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Kcp")
+            .field("conv", &self.conv)
+            .field("mtu", &self.mtu)
+            .field("mss", &self.mss)
+            .field("state", &self.state)
+            .field("snd_una", &self.snd_una)
+            .field("snd_nxt", &self.snd_nxt)
+            .field("rcv_nxt", &self.rcv_nxt)
+            .field("ssthresh", &self.ssthresh)
+            .field("rx_rttval", &self.rx_rttval)
+            .field("rx_srtt", &self.rx_srtt)
+            .field("rx_rto", &self.rx_rto)
+            .field("rx_minrto", &self.rx_minrto)
+            .field("snd_wnd", &self.snd_wnd)
+            .field("rcv_wnd", &self.rcv_wnd)
+            .field("rmt_wnd", &self.rmt_wnd)
+            .field("cwnd", &self.cwnd)
+            .field("probe", &self.probe)
+            .field("current", &self.current)
+            .field("interval", &self.interval)
+            .field("ts_flush", &self.ts_flush)
+            .field("xmit", &self.xmit)
+            .field("nodelay", &self.nodelay)
+            .field("updated", &self.updated)
+            .field("ts_probe", &self.ts_probe)
+            .field("probe_wait", &self.probe_wait)
+            .field("dead_link", &self.dead_link)
+            .field("incr", &self.incr)
+            .field("snd_queue.len", &self.snd_queue.len())
+            .field("rcv_queue.len", &self.rcv_queue.len())
+            .field("snd_buf.len", &self.snd_buf.len())
+            .field("rcv_buf.len", &self.rcv_buf.len())
+            .field("acklist.len", &self.acklist.len())
+            .field("buf.len", &self.buf.len())
+            .field("fastresend", &self.fastresend)
+            .field("fastlimit", &self.fastlimit)
+            .field("nocwnd", &self.nocwnd)
+            .field("stream", &self.stream)
+            .field("input_conv", &self.input_conv)
+            .finish()
+    }
 }
 
 impl<Output: Write> Kcp<Output> {
