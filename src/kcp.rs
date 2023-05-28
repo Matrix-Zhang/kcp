@@ -31,7 +31,8 @@ const KCP_MTU_DEF: usize = 1400;
 // const KCP_ACK_FAST: u32 = 3;
 
 const KCP_INTERVAL: u32 = 100;
-const KCP_OVERHEAD: usize = 24;
+/// KCP Header size
+pub const KCP_OVERHEAD: usize = 24;
 const KCP_DEADLINK: u32 = 20;
 
 const KCP_THRESH_INIT: u16 = 2;
