@@ -5,8 +5,14 @@ use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::fmt::{self, Debug};
 use std::io::{self, Cursor, Read, Write};
+#[cfg(feature = "tokio")]
+use std::pin::Pin;
+#[cfg(feature = "tokio")]
+use std::task::{Context, Poll};
 
 use bytes::{Buf, BufMut, BytesMut};
+#[cfg(feature = "tokio")]
+use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 use crate::error::Error;
 use crate::KcpResult;
@@ -131,7 +137,7 @@ impl KcpSegment {
 }
 
 #[derive(Default)]
-struct KcpOutput<O: Write>(O);
+struct KcpOutput<O>(O);
 
 impl<O: Write> Write for KcpOutput<O> {
     #[inline]
@@ -146,9 +152,41 @@ impl<O: Write> Write for KcpOutput<O> {
     }
 }
 
+#[cfg(feature = "tokio")]
+impl<O: AsyncWrite + Unpin> AsyncWrite for KcpOutput<O> {
+    #[inline(always)]
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.0).poll_write(cx, buf)
+    }
+    #[inline(always)]
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.0).poll_flush(cx)
+    }
+    #[inline(always)]
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.0).poll_shutdown(cx)
+    }
+    #[inline(always)]
+    fn poll_write_vectored(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        bufs: &[io::IoSlice<'_>],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.0).poll_write_vectored(cx, bufs)
+    }
+    #[inline(always)]
+    fn is_write_vectored(&self) -> bool {
+        self.0.is_write_vectored()
+    }
+}
+
 /// KCP control
 #[derive(Default)]
-pub struct Kcp<Output: Write> {
+pub struct Kcp<Output> {
     /// Conversation ID
     conv: u32,
     /// Maximum Transmission Unit
@@ -236,7 +274,7 @@ pub struct Kcp<Output: Write> {
     output: KcpOutput<Output>,
 }
 
-impl<Output: Write> Debug for Kcp<Output> {
+impl<Output> Debug for Kcp<Output> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Kcp")
             .field("conv", &self.conv)
@@ -281,7 +319,7 @@ impl<Output: Write> Debug for Kcp<Output> {
     }
 }
 
-impl<Output: Write> Kcp<Output> {
+impl<Output> Kcp<Output> {
     /// Creates a KCP control object, `conv` must be equal in both endpoints in one connection.
     /// `output` is the callback object for writing.
     ///
@@ -385,7 +423,7 @@ impl<Output: Write> Kcp<Output> {
         // Merge fragment
         let mut cur = Cursor::new(buf);
         while let Some(seg) = self.rcv_queue.pop_front() {
-            cur.write_all(&seg.data)?;
+            Write::write_all(&mut cur, &seg.data)?;
 
             trace!("recv sn={}", seg.sn);
 
@@ -823,23 +861,6 @@ impl<Output: Write> Kcp<Output> {
         }
     }
 
-    fn _flush_ack(&mut self, segment: &mut KcpSegment) -> KcpResult<()> {
-        // flush acknowledges
-        // while let Some((sn, ts)) = self.acklist.pop_front() {
-        for &(sn, ts) in &self.acklist {
-            if self.buf.len() + KCP_OVERHEAD as usize > self.mtu as usize {
-                self.output.write_all(&self.buf)?;
-                self.buf.clear();
-            }
-            segment.sn = sn;
-            segment.ts = ts;
-            segment.encode(&mut self.buf);
-        }
-        self.acklist.clear();
-
-        Ok(())
-    }
-
     fn probe_wnd_size(&mut self) {
         // probe window size (if remote window size equals zero)
         if self.rmt_wnd == 0 {
@@ -866,6 +887,207 @@ impl<Output: Write> Kcp<Output> {
             self.ts_probe = 0;
             self.probe_wait = 0;
         }
+    }
+
+    /// Determine when you should call `update`.
+    /// Return when you should invoke `update` in millisec, if there is no `input`/`send` calling.
+    /// You can call `update` in that time without calling it repeatly.
+    pub fn check(&self, current: u32) -> u32 {
+        if !self.updated {
+            return 0;
+        }
+
+        let mut ts_flush = self.ts_flush;
+        let mut tm_packet = u32::max_value();
+
+        if timediff(current, ts_flush) >= 10000 || timediff(current, ts_flush) < -10000 {
+            ts_flush = current;
+        }
+
+        if timediff(current, ts_flush) >= 0 {
+            return 0;
+        }
+
+        let tm_flush = timediff(ts_flush, current) as u32;
+        for seg in &self.snd_buf {
+            let diff = timediff(seg.resendts, current);
+            if diff <= 0 {
+                return 0;
+            }
+            if (diff as u32) < tm_packet {
+                tm_packet = diff as u32;
+            }
+        }
+
+        let mut minimal = cmp::min(tm_packet, tm_flush);
+        if minimal >= self.interval {
+            minimal = self.interval;
+        }
+
+        minimal
+    }
+
+    /// Change MTU size, default is 1400
+    ///
+    /// MTU = Maximum Transmission Unit
+    pub fn set_mtu(&mut self, mtu: usize) -> KcpResult<()> {
+        if mtu < 50 || mtu < KCP_OVERHEAD {
+            debug!("set_mtu mtu={} invalid", mtu);
+            return Err(Error::InvalidMtu(mtu));
+        }
+
+        self.mtu = mtu;
+        self.mss = self.mtu - KCP_OVERHEAD;
+
+        let target_size = ((mtu + KCP_OVERHEAD) * 3) as usize;
+        if target_size > self.buf.capacity() {
+            self.buf.reserve(target_size - self.buf.capacity());
+        }
+
+        Ok(())
+    }
+
+    /// Get MTU
+    #[inline]
+    pub fn mtu(&self) -> usize {
+        self.mtu
+    }
+
+    /// Set check interval
+    pub fn set_interval(&mut self, mut interval: u32) {
+        if interval > 5000 {
+            interval = 5000;
+        } else if interval < 10 {
+            interval = 10;
+        }
+        self.interval = interval;
+    }
+
+    /// Set nodelay
+    ///
+    /// fastest config: nodelay(true, 20, 2, true)
+    ///
+    /// `nodelay`: default is disable (false)
+    /// `interval`: internal update timer interval in millisec, default is 100ms
+    /// `resend`: 0:disable fast resend(default), 1:enable fast resend
+    /// `nc`: `false`: normal congestion control(default), `true`: disable congestion control
+    pub fn set_nodelay(&mut self, nodelay: bool, interval: i32, resend: i32, nc: bool) {
+        if nodelay {
+            self.nodelay = true;
+            self.rx_minrto = KCP_RTO_NDL;
+        } else {
+            self.nodelay = false;
+            self.rx_minrto = KCP_RTO_MIN;
+        }
+
+        match interval {
+            interval if interval < 10 => self.interval = 10,
+            interval if interval > 5000 => self.interval = 5000,
+            _ => self.interval = interval as u32,
+        }
+
+        if resend >= 0 {
+            self.fastresend = resend as u32;
+        }
+
+        self.nocwnd = nc;
+    }
+
+    /// Set `wndsize`
+    /// set maximum window size: `sndwnd=32`, `rcvwnd=32` by default
+    pub fn set_wndsize(&mut self, sndwnd: u16, rcvwnd: u16) {
+        if sndwnd > 0 {
+            self.snd_wnd = sndwnd as u16;
+        }
+
+        if rcvwnd > 0 {
+            self.rcv_wnd = cmp::max(rcvwnd, KCP_WND_RCV) as u16;
+        }
+    }
+
+    /// `snd_wnd` Send window
+    #[inline]
+    pub fn snd_wnd(&self) -> u16 {
+        self.snd_wnd
+    }
+
+    /// `rcv_wnd` Receive window
+    #[inline]
+    pub fn rcv_wnd(&self) -> u16 {
+        self.rcv_wnd
+    }
+
+    /// Get `waitsnd`, how many packet is waiting to be sent
+    #[inline]
+    pub fn wait_snd(&self) -> usize {
+        self.snd_buf.len() + self.snd_queue.len()
+    }
+
+    /// Get `rmt_wnd`, remote window size
+    #[inline]
+    pub fn rmt_wnd(&self) -> u16 {
+        self.rmt_wnd
+    }
+
+    /// Set `rx_minrto`
+    #[inline]
+    pub fn set_rx_minrto(&mut self, rto: u32) {
+        self.rx_minrto = rto;
+    }
+
+    /// Set `fastresend`
+    #[inline]
+    pub fn set_fast_resend(&mut self, fr: u32) {
+        self.fastresend = fr;
+    }
+
+    /// KCP header size
+    #[inline]
+    pub fn header_len() -> usize {
+        KCP_OVERHEAD as usize
+    }
+
+    /// Enabled stream or not
+    #[inline]
+    pub fn is_stream(&self) -> bool {
+        self.stream
+    }
+
+    /// Maximum Segment Size
+    #[inline]
+    pub fn mss(&self) -> usize {
+        self.mss
+    }
+
+    /// Set maximum resend times
+    #[inline]
+    pub fn set_maximum_resend_times(&mut self, dead_link: u32) {
+        self.dead_link = dead_link;
+    }
+
+    /// Check if KCP connection is dead (resend times excceeded)
+    #[inline]
+    pub fn is_dead_link(&self) -> bool {
+        self.state != 0
+    }
+}
+
+impl<Output: Write> Kcp<Output> {
+    fn _flush_ack(&mut self, segment: &mut KcpSegment) -> KcpResult<()> {
+        // flush acknowledges
+        // while let Some((sn, ts)) = self.acklist.pop_front() {
+        for &(sn, ts) in &self.acklist {
+            if self.buf.len() + KCP_OVERHEAD as usize > self.mtu as usize {
+                self.output.write_all(&self.buf)?;
+                self.buf.clear();
+            }
+            segment.sn = sn;
+            segment.ts = ts;
+            segment.encode(&mut self.buf);
+        }
+        self.acklist.clear();
+
+        Ok(())
     }
 
     fn _flush_probe_commands(&mut self, cmd: u8, segment: &mut KcpSegment) -> KcpResult<()> {
@@ -1082,186 +1304,245 @@ impl<Output: Write> Kcp<Output> {
 
         Ok(())
     }
+}
 
-    /// Determine when you should call `update`.
-    /// Return when you should invoke `update` in millisec, if there is no `input`/`send` calling.
-    /// You can call `update` in that time without calling it repeatly.
-    pub fn check(&self, current: u32) -> u32 {
-        if !self.updated {
-            return 0;
-        }
-
-        let mut ts_flush = self.ts_flush;
-        let mut tm_packet = u32::max_value();
-
-        if timediff(current, ts_flush) >= 10000 || timediff(current, ts_flush) < -10000 {
-            ts_flush = current;
-        }
-
-        if timediff(current, ts_flush) >= 0 {
-            return 0;
-        }
-
-        let tm_flush = timediff(ts_flush, current) as u32;
-        for seg in &self.snd_buf {
-            let diff = timediff(seg.resendts, current);
-            if diff <= 0 {
-                return 0;
+#[cfg(feature = "tokio")]
+impl<Output: AsyncWrite + Unpin> Kcp<Output> {
+    async fn _async_flush_ack(&mut self, segment: &mut KcpSegment) -> KcpResult<()> {
+        // flush acknowledges
+        // while let Some((sn, ts)) = self.acklist.pop_front() {
+        for &(sn, ts) in &self.acklist {
+            if self.buf.len() + KCP_OVERHEAD as usize > self.mtu as usize {
+                self.output.write_all(&self.buf).await?;
+                self.buf.clear();
             }
-            if (diff as u32) < tm_packet {
-                tm_packet = diff as u32;
-            }
+            segment.sn = sn;
+            segment.ts = ts;
+            segment.encode(&mut self.buf);
         }
+        self.acklist.clear();
 
-        let mut minimal = cmp::min(tm_packet, tm_flush);
-        if minimal >= self.interval {
-            minimal = self.interval;
-        }
-
-        minimal
+        Ok(())
     }
 
-    /// Change MTU size, default is 1400
-    ///
-    /// MTU = Maximum Transmission Unit
-    pub fn set_mtu(&mut self, mtu: usize) -> KcpResult<()> {
-        if mtu < 50 || mtu < KCP_OVERHEAD {
-            debug!("set_mtu mtu={} invalid", mtu);
-            return Err(Error::InvalidMtu(mtu));
+    async fn _async_flush_probe_commands(
+        &mut self,
+        cmd: u8,
+        segment: &mut KcpSegment,
+    ) -> KcpResult<()> {
+        segment.cmd = cmd;
+        if self.buf.len() + KCP_OVERHEAD as usize > self.mtu as usize {
+            self.output.write_all(&self.buf).await?;
+            self.buf.clear();
+        }
+        segment.encode(&mut self.buf);
+        Ok(())
+    }
+
+    async fn async_flush_probe_commands(&mut self, segment: &mut KcpSegment) -> KcpResult<()> {
+        // flush window probing commands
+        if (self.probe & KCP_ASK_SEND) != 0 {
+            self._async_flush_probe_commands(KCP_CMD_WASK, segment)
+                .await?;
         }
 
-        self.mtu = mtu;
-        self.mss = self.mtu - KCP_OVERHEAD;
+        // flush window probing commands
+        if (self.probe & KCP_ASK_TELL) != 0 {
+            self._async_flush_probe_commands(KCP_CMD_WINS, segment)
+                .await?;
+        }
+        self.probe = 0;
+        Ok(())
+    }
 
-        let target_size = ((mtu + KCP_OVERHEAD) * 3) as usize;
-        if target_size > self.buf.capacity() {
-            self.buf.reserve(target_size - self.buf.capacity());
+    /// Flush pending ACKs
+    pub async fn async_flush_ack(&mut self) -> KcpResult<()> {
+        if !self.updated {
+            debug!("flush updated() must be called at least once");
+            return Err(Error::NeedUpdate);
+        }
+
+        let mut segment = KcpSegment {
+            conv: self.conv,
+            cmd: KCP_CMD_ACK,
+            wnd: self.wnd_unused(),
+            una: self.rcv_nxt,
+            ..Default::default()
+        };
+
+        self._async_flush_ack(&mut segment).await
+    }
+
+    /// Flush pending data in buffer.
+    pub async fn async_flush(&mut self) -> KcpResult<()> {
+        if !self.updated {
+            debug!("flush updated() must be called at least once");
+            return Err(Error::NeedUpdate);
+        }
+
+        let mut segment = KcpSegment {
+            conv: self.conv,
+            cmd: KCP_CMD_ACK,
+            wnd: self.wnd_unused(),
+            una: self.rcv_nxt,
+            ..Default::default()
+        };
+
+        self._async_flush_ack(&mut segment).await?;
+        self.probe_wnd_size();
+        self.async_flush_probe_commands(&mut segment).await?;
+
+        // println!("SNDBUF size {}", self.snd_buf.len());
+
+        // calculate window size
+        let mut cwnd = cmp::min(self.snd_wnd, self.rmt_wnd);
+        if !self.nocwnd {
+            cwnd = cmp::min(self.cwnd, cwnd);
+        }
+
+        // move data from snd_queue to snd_buf
+        while timediff(self.snd_nxt, self.snd_una + cwnd as u32) < 0 {
+            match self.snd_queue.pop_front() {
+                Some(mut new_segment) => {
+                    new_segment.conv = self.conv;
+                    new_segment.cmd = KCP_CMD_PUSH;
+                    new_segment.wnd = segment.wnd;
+                    new_segment.ts = self.current;
+                    new_segment.sn = self.snd_nxt;
+                    self.snd_nxt += 1;
+                    new_segment.una = self.rcv_nxt;
+                    new_segment.resendts = self.current;
+                    new_segment.rto = self.rx_rto;
+                    new_segment.fastack = 0;
+                    new_segment.xmit = 0;
+                    self.snd_buf.push_back(new_segment);
+                }
+                None => break,
+            }
+        }
+
+        // calculate resent
+        let resent = if self.fastresend > 0 {
+            self.fastresend
+        } else {
+            u32::max_value()
+        };
+
+        let rtomin = if !self.nodelay { self.rx_rto >> 3 } else { 0 };
+
+        let mut lost = false;
+        let mut change = 0;
+
+        for snd_segment in &mut self.snd_buf {
+            let mut need_send = false;
+
+            if snd_segment.xmit == 0 {
+                need_send = true;
+                snd_segment.xmit += 1;
+                snd_segment.rto = self.rx_rto;
+                snd_segment.resendts = self.current + snd_segment.rto + rtomin;
+            } else if timediff(self.current, snd_segment.resendts) >= 0 {
+                need_send = true;
+                snd_segment.xmit += 1;
+                self.xmit += 1;
+                if !self.nodelay {
+                    snd_segment.rto += cmp::max(snd_segment.rto, self.rx_rto);
+                } else {
+                    let step = snd_segment.rto; // (kcp->nodelay < 2) ? ((IINT32)(segment->rto)) : kcp->rx_rto;
+                    snd_segment.rto += step / 2;
+                }
+                snd_segment.resendts = self.current + snd_segment.rto;
+                lost = true;
+            } else if snd_segment.fastack >= resent {
+                if snd_segment.xmit <= self.fastlimit || self.fastlimit <= 0 {
+                    need_send = true;
+                    snd_segment.xmit += 1;
+                    snd_segment.fastack = 0;
+                    snd_segment.resendts = self.current + snd_segment.rto;
+                    change += 1;
+                }
+            }
+
+            if need_send {
+                snd_segment.ts = self.current;
+                snd_segment.wnd = segment.wnd;
+                snd_segment.una = self.rcv_nxt;
+
+                let need = KCP_OVERHEAD as usize + snd_segment.data.len();
+
+                if self.buf.len() + need > self.mtu as usize {
+                    self.output.write_all(&self.buf).await?;
+                    self.buf.clear();
+                }
+
+                snd_segment.encode(&mut self.buf);
+
+                if snd_segment.xmit >= self.dead_link {
+                    self.state = -1; // (IUINT32)-1
+                }
+            }
+        }
+
+        // Flush all data in buffer
+        if !self.buf.is_empty() {
+            self.output.write_all(&self.buf).await?;
+            self.buf.clear();
+        }
+
+        // update ssthresh
+        if change > 0 {
+            let inflight = self.snd_nxt - self.snd_una;
+            self.ssthresh = inflight as u16 / 2;
+            if self.ssthresh < KCP_THRESH_MIN {
+                self.ssthresh = KCP_THRESH_MIN;
+            }
+            self.cwnd = self.ssthresh + resent as u16;
+            self.incr = self.cwnd as usize * self.mss;
+        }
+
+        if lost {
+            self.ssthresh = cwnd / 2;
+            if self.ssthresh < KCP_THRESH_MIN {
+                self.ssthresh = KCP_THRESH_MIN;
+            }
+            self.cwnd = 1;
+            self.incr = self.mss;
+        }
+
+        if self.cwnd < 1 {
+            self.cwnd = 1;
+            self.incr = self.mss;
         }
 
         Ok(())
     }
 
-    /// Get MTU
-    #[inline]
-    pub fn mtu(&self) -> usize {
-        self.mtu
-    }
-
-    /// Set check interval
-    pub fn set_interval(&mut self, mut interval: u32) {
-        if interval > 5000 {
-            interval = 5000;
-        } else if interval < 10 {
-            interval = 10;
-        }
-        self.interval = interval;
-    }
-
-    /// Set nodelay
+    /// Update state every 10ms ~ 100ms.
     ///
-    /// fastest config: nodelay(true, 20, 2, true)
-    ///
-    /// `nodelay`: default is disable (false)
-    /// `interval`: internal update timer interval in millisec, default is 100ms
-    /// `resend`: 0:disable fast resend(default), 1:enable fast resend
-    /// `nc`: `false`: normal congestion control(default), `true`: disable congestion control
-    pub fn set_nodelay(&mut self, nodelay: bool, interval: i32, resend: i32, nc: bool) {
-        if nodelay {
-            self.nodelay = true;
-            self.rx_minrto = KCP_RTO_NDL;
-        } else {
-            self.nodelay = false;
-            self.rx_minrto = KCP_RTO_MIN;
+    /// Or you can ask `check` when to call this again.
+    pub async fn async_update(&mut self, current: u32) -> KcpResult<()> {
+        self.current = current;
+
+        if !self.updated {
+            self.updated = true;
+            self.ts_flush = self.current;
         }
 
-        match interval {
-            interval if interval < 10 => self.interval = 10,
-            interval if interval > 5000 => self.interval = 5000,
-            _ => self.interval = interval as u32,
+        let mut slap = timediff(self.current, self.ts_flush);
+
+        if slap >= 10000 || slap < -10000 {
+            self.ts_flush = self.current;
+            slap = 0;
         }
 
-        if resend >= 0 {
-            self.fastresend = resend as u32;
+        if slap >= 0 {
+            self.ts_flush += self.interval;
+            if timediff(self.current, self.ts_flush) >= 0 {
+                self.ts_flush = self.current + self.interval;
+            }
+            self.async_flush().await?;
         }
 
-        self.nocwnd = nc;
-    }
-
-    /// Set `wndsize`
-    /// set maximum window size: `sndwnd=32`, `rcvwnd=32` by default
-    pub fn set_wndsize(&mut self, sndwnd: u16, rcvwnd: u16) {
-        if sndwnd > 0 {
-            self.snd_wnd = sndwnd as u16;
-        }
-
-        if rcvwnd > 0 {
-            self.rcv_wnd = cmp::max(rcvwnd, KCP_WND_RCV) as u16;
-        }
-    }
-
-    /// `snd_wnd` Send window
-    #[inline]
-    pub fn snd_wnd(&self) -> u16 {
-        self.snd_wnd
-    }
-
-    /// `rcv_wnd` Receive window
-    #[inline]
-    pub fn rcv_wnd(&self) -> u16 {
-        self.rcv_wnd
-    }
-
-    /// Get `waitsnd`, how many packet is waiting to be sent
-    #[inline]
-    pub fn wait_snd(&self) -> usize {
-        self.snd_buf.len() + self.snd_queue.len()
-    }
-
-    /// Get `rmt_wnd`, remote window size
-    #[inline]
-    pub fn rmt_wnd(&self) -> u16 {
-        self.rmt_wnd
-    }
-
-    /// Set `rx_minrto`
-    #[inline]
-    pub fn set_rx_minrto(&mut self, rto: u32) {
-        self.rx_minrto = rto;
-    }
-
-    /// Set `fastresend`
-    #[inline]
-    pub fn set_fast_resend(&mut self, fr: u32) {
-        self.fastresend = fr;
-    }
-
-    /// KCP header size
-    #[inline]
-    pub fn header_len() -> usize {
-        KCP_OVERHEAD as usize
-    }
-
-    /// Enabled stream or not
-    #[inline]
-    pub fn is_stream(&self) -> bool {
-        self.stream
-    }
-
-    /// Maximum Segment Size
-    #[inline]
-    pub fn mss(&self) -> usize {
-        self.mss
-    }
-
-    /// Set maximum resend times
-    #[inline]
-    pub fn set_maximum_resend_times(&mut self, dead_link: u32) {
-        self.dead_link = dead_link;
-    }
-
-    /// Check if KCP connection is dead (resend times excceeded)
-    #[inline]
-    pub fn is_dead_link(&self) -> bool {
-        self.state != 0
+        Ok(())
     }
 }

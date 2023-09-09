@@ -1,6 +1,6 @@
 [package]
 name = "kcp"
-version = "0.5.3"
+version = "0.6.0"
 authors = ["Matrix <113445886@qq.com>", "Y. T. Chung <zonyitoo@gmail.com>"]
 description = "Reliable-UDP Library for Rust"
 license = "MIT"
@@ -17,6 +17,7 @@ fastack-conserve = []
 bytes = "1.0"
 log = "0.4"
 thiserror = "1.0.36"
+tokio = { version = "1", optional = true, features = ["io-util"] }
 
 [dev-dependencies]
 time = "0.3"
