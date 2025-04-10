@@ -5,13 +5,13 @@ use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::fmt::{self, Debug};
 use std::io::{self, Cursor, Read, Write};
-#[cfg(feature = "tokio")]
+#[cfg(feature = "use-tokio")]
 use std::pin::Pin;
-#[cfg(feature = "tokio")]
+#[cfg(feature = "use-tokio")]
 use std::task::{Context, Poll};
 
 use bytes::{Buf, BufMut, BytesMut};
-#[cfg(feature = "tokio")]
+#[cfg(feature = "use-tokio")]
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 use crate::error::Error;
@@ -152,7 +152,7 @@ impl<O: Write> Write for KcpOutput<O> {
     }
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "use-tokio")]
 impl<O: AsyncWrite + Unpin> AsyncWrite for KcpOutput<O> {
     #[inline(always)]
     fn poll_write(
@@ -1306,7 +1306,7 @@ impl<Output: Write> Kcp<Output> {
     }
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "use-tokio")]
 impl<Output: AsyncWrite + Unpin> Kcp<Output> {
     async fn _async_flush_ack(&mut self, segment: &mut KcpSegment) -> KcpResult<()> {
         // flush acknowledges
