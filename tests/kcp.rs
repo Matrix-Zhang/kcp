@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use bytes::buf::{Buf, BufMut};
 use bytes::BytesMut;
-
+use rand::Rng;
 use kcp::Kcp;
 
 #[derive(Debug)]
@@ -69,7 +69,7 @@ impl Random {
             self.size = self.seeds.len();
         }
 
-        let i = rand::random::<usize>() % self.size;
+        let i = rand::rng().random_range(0..self.size);
         let x = self.seeds[i];
 
         self.size -= 1;
